@@ -644,6 +644,7 @@ class Frames(object):
         d = {k: v for k, v in d.items() if v is not None}
 
         d["_sample_id"] = self._sample_id
+        d["_dataset_id"] = self._dataset._doc.id
 
         return d
 
@@ -1038,6 +1039,15 @@ class Frame(Document, metaclass=FrameSingleton):
     _NO_DATASET_DOC_CLS = foo.NoDatasetFrameDocument
 
     @property
+    def dataset_id(self):
+        return self._doc._dataset_id
+
+    @property
+    def _dataset_id(self):
+        _id = self._doc._dataset_id
+        return ObjectId(_id) if _id is not None else None
+
+    @property
     def sample_id(self):
         return self._doc._sample_id
 
@@ -1101,6 +1111,15 @@ class FrameView(DocumentView):
     """
 
     _DOCUMENT_CLS = Frame
+
+    @property
+    def dataset_id(self):
+        return self._doc._dataset_id
+
+    @property
+    def _dataset_id(self):
+        _id = self._doc._dataset_id
+        return ObjectId(_id) if _id is not None else None
 
     @property
     def sample_id(self):

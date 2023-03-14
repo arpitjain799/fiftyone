@@ -1,14 +1,20 @@
-import React, { MutableRefObject, useEffect, useRef, useState } from "react";
+import React, {
+  MutableRefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRecoilCallback, useRecoilValue } from "recoil";
 import { v4 as uuid } from "uuid";
 
 import { useEventHandler } from "@fiftyone/state";
 
 import { useTheme } from "@fiftyone/components";
+import { AbstractLooker } from "@fiftyone/looker";
 import * as fos from "@fiftyone/state";
 import { useOnSelectLabel } from "@fiftyone/state";
 import { useErrorHandler } from "react-error-boundary";
-import { TooltipInfo } from "./TooltipInfo";
 
 type EventCallback = (event: CustomEvent) => void;
 
@@ -55,18 +61,39 @@ const useClearSelectedLabels = () => {
 };
 
 interface LookerProps {
+  sample?: fos.SampleData;
   lookerRef?: MutableRefObject<any>;
+  lookerRefCallback?: (looker: AbstractLooker) => void;
   onClose?: EventCallback;
   onClick?: React.MouseEventHandler<HTMLDivElement>;
 }
 
-const Looker = ({ lookerRef, onClose }: LookerProps) => {
+const Looker = ({
+  sample: propsSampleData,
+  lookerRef,
+  lookerRefCallback,
+  onClose,
+}: LookerProps) => {
   const [id] = useState(() => uuid());
 
-  const sampleData = useRecoilValue(fos.modal);
-  if (!sampleData) {
+  const modalSampleData = useRecoilValue(fos.modal);
+
+  if (!modalSampleData && !propsSampleData) {
     throw new Error("bad");
   }
+
+  const sampleData = useMemo(() => {
+    if (!propsSampleData) {
+      return modalSampleData;
+    }
+
+    return {
+      ...modalSampleData,
+      sample: propsSampleData,
+      urls: { filepath: propsSampleData.filepath },
+    };
+  }, [propsSampleData, modalSampleData]);
+
   const { sample } = sampleData;
 
   const theme = useTheme();
@@ -80,6 +107,12 @@ const Looker = ({ lookerRef, onClose }: LookerProps) => {
     () => createLooker.current(sampleData),
     [useRecoilValue(fos.selectedMediaField(true)), reset, createLooker]
   );
+
+  useEffect(() => {
+    if (looker) {
+      lookerRefCallback && lookerRefCallback(looker);
+    }
+  }, [looker, lookerRefCallback]);
 
   useEffect(() => {
     !initialRef.current && looker.updateOptions(lookerOptions);
@@ -147,23 +180,17 @@ const Looker = ({ lookerRef, onClose }: LookerProps) => {
 
   useEventHandler(looker, "clear", useClearSelectedLabels());
 
-  const tooltip = fos.useTooltip();
-  useEventHandler(looker, "tooltip", (e) => {
-    tooltip.setDetail(e.detail ? e.detail : null);
-    e.detail && tooltip.setCoords(e.detail.coordinates);
-  });
-
   const hoveredSample = useRecoilValue(fos.hoveredSample);
 
   useEffect(() => {
-    hoveredSample &&
-      looker.updater((state) => ({
-        ...state,
-        shouldHandleKeyEvents: hoveredSample._id === sample._id,
-        options: {
-          ...state.options,
-        },
-      }));
+    const hoveredSampleId = hoveredSample && hoveredSample._id;
+    looker.updater((state) => ({
+      ...state,
+      shouldHandleKeyEvents: hoveredSampleId === sample._id,
+      options: {
+        ...state.options,
+      },
+    }));
   }, [hoveredSample, sample, looker]);
 
   return (
@@ -175,9 +202,7 @@ const Looker = ({ lookerRef, onClose }: LookerProps) => {
         background: theme.background.level2,
         position: "relative",
       }}
-    >
-      <TooltipInfo coordinates={tooltip.coordinates} />
-    </div>
+    />
   );
 };
 
