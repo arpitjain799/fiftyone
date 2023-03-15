@@ -2565,6 +2565,12 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         d["_dataset_id"] = self._doc.id
 
+        # Add created and updated time to sample. We cannot use $$NOW to use
+        #   the DB's time because it's not supported on insert
+        now = datetime.utcnow()
+        # d["created_at"] = now
+        d["last_updated_at"] = now
+
         return d
 
     def _bulk_write(self, ops, frames=False, ordered=False):
@@ -3728,6 +3734,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                         "_id": False,
                         "_sample_id": "$_id",
                         "_dataset_id": self._doc.id,
+                        "last_updated_at": "$$NOW",
+                        # "created_at": "$$NOW",
                         "frame_number": {
                             "$range": [
                                 1,
@@ -6625,14 +6633,30 @@ def _clone_dataset_or_view(dataset_or_view, name, persistent):
 
     # Clone samples
     coll, pipeline = _get_samples_pipeline(dataset_or_view)
-    pipeline.append({"$set": {"_dataset_id": _id}})
+    pipeline.append(
+        {
+            "$set": {
+                "_dataset_id": _id,
+                # "created_at": "$$NOW",
+                "last_updated_at": "$$NOW",
+            }
+        }
+    )
     pipeline.append({"$out": sample_collection_name})
     foo.aggregate(coll, pipeline)
 
     # Clone frames
     if contains_videos:
         coll, pipeline = _get_frames_pipeline(dataset_or_view)
-        pipeline.append({"$set": {"_dataset_id": _id}})
+        pipeline.append(
+            {
+                "$set": {
+                    "_dataset_id": _id,
+                    # "created_at": "$$NOW",
+                    "last_updated_at": "$$NOW",
+                }
+            }
+        )
         pipeline.append({"$out": frame_collection_name})
         foo.aggregate(coll, pipeline)
 
@@ -7119,7 +7143,13 @@ def _add_collection_with_new_ids(
             detach_groups=True,
             post_pipeline=[
                 {"$unset": "_id"},
-                {"$set": {"_dataset_id": dataset._doc.id}},
+                {
+                    "$set": {
+                        "_dataset_id": dataset._doc.id,
+                        # "created_at": "$$NOW",
+                        "last_updated_at": "$$NOW",
+                    }
+                },
                 {
                     "$merge": {
                         "into": dataset._sample_collection_name,
@@ -7151,7 +7181,13 @@ def _add_collection_with_new_ids(
         detach_groups=True,
         post_pipeline=[
             {"$unset": "_id"},
-            {"$set": {"_dataset_id": dataset._doc.id}},
+            {
+                "$set": {
+                    "_dataset_id": dataset._doc.id,
+                    # "created_at": "$$NOW",
+                    "last_updated_at": "$$NOW",
+                }
+            },
             {
                 "$merge": {
                     "into": dataset._sample_collection_name,
@@ -7167,7 +7203,13 @@ def _add_collection_with_new_ids(
         post_pipeline=[
             {"$set": {"_tmp": "$_sample_id", "_sample_id": {"$rand": {}}}},
             {"$unset": "_id"},
-            {"$set": {"_dataset_id": dataset._doc.id}},
+            {
+                "$set": {
+                    "_dataset_id": dataset._doc.id,
+                    # "created_at": "$$NOW",
+                    "last_updated_at": "$$NOW",
+                }
+            },
             {
                 "$merge": {
                     "into": dataset._frame_collection_name,
@@ -7463,7 +7505,12 @@ def _merge_samples_pipeline(
 
     sample_pipeline.extend(
         [
-            {"$set": {"_dataset_id": dst_dataset._doc.id}},
+            {
+                "$set": {
+                    "_dataset_id": dst_dataset._doc.id,
+                    "last_updated_at": "$$NOW",
+                }
+            },
             {
                 "$merge": {
                     "into": dst_dataset._sample_collection_name,
@@ -7556,6 +7603,7 @@ def _merge_samples_pipeline(
                     "$set": {
                         "_dataset_id": dst_dataset._doc.id,
                         "_sample_id": "$" + frame_key_field,
+                        "last_updated_at": "$$NOW",
                     }
                 },
                 {

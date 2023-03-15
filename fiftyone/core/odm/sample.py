@@ -85,6 +85,7 @@ class DatasetSampleDocument(DatasetMixin, Document):
     filepath = fof.StringField(required=True)
     tags = fof.ListField(fof.StringField())
     metadata = fof.EmbeddedDocumentField(fom.Metadata, null=True)
+    last_updated_at = fof.DateTimeField()
 
     _media_type = fof.StringField()
     _rand = fof.FloatField(default=_generate_rand)

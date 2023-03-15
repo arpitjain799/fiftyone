@@ -74,6 +74,10 @@ class _SampleMixin(object):
         raise ValueError("Image samples are not iterable")
 
     @property
+    def last_updated_at(self):
+        return self._doc.last_updated_at
+
+    @property
     def dataset_id(self):
         return self._doc._dataset_id
 

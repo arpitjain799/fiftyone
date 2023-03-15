@@ -5,6 +5,7 @@ Video frames.
 | `voxel51.com <https://voxel51.com/>`_
 |
 """
+import datetime
 import itertools
 
 from bson import ObjectId
@@ -643,6 +644,7 @@ class Frames(object):
 
         d["_sample_id"] = self._sample_id
         d["_dataset_id"] = self._dataset._doc.id
+        d["last_updated_at"] = datetime.datetime.utcnow()
 
         return d
 
@@ -1124,6 +1126,10 @@ class FrameView(DocumentView):
     """
 
     _DOCUMENT_CLS = Frame
+
+    @property
+    def last_updated_at(self):
+        return self._doc.last_updated_at
 
     @property
     def dataset_id(self):
