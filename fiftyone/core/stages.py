@@ -4197,7 +4197,7 @@ class SelectGroupSlices(ViewStage):
                     % (slices, media_types)
                 )
 
-            return next(iter(media_types))
+            return next(iter(media_types), None)
 
         # One group slice
         if slices not in group_media_types:
