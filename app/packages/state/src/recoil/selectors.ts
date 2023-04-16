@@ -1,9 +1,12 @@
 import { atomFamily, selector, selectorFamily } from "recoil";
 import { v4 as uuid } from "uuid";
 
-import { KeypointSkeleton } from "@fiftyone/looker/src/state";
+import { KeypointSkeleton, MaskTargets } from "@fiftyone/looker/src/state";
 
-import { isRgbMaskTargets } from "@fiftyone/looker/src/overlays/util";
+import {
+  isRgbMaskTargets,
+  normalizeMaskTargetsCase,
+} from "@fiftyone/looker/src/overlays/util";
 import { StateForm } from "@fiftyone/relay";
 import { toSnakeCase } from "@fiftyone/utilities";
 import * as atoms from "./atoms";
@@ -11,11 +14,10 @@ import { selectedSamples } from "./atoms";
 import { config } from "./config";
 import { filters, modalFilters } from "./filters";
 import { resolvedGroupSlice } from "./groups";
+import { pathFilter } from "./pathFilters";
 import { fieldSchema } from "./schema";
 import { State } from "./types";
-import _ from "lodash";
 import { isPatchesView } from "./view";
-import { pathFilter } from "./pathFilters";
 
 export const datasetName = selector<string>({
   key: "datasetName",
@@ -117,7 +119,9 @@ export const datasetAppConfig = selector<State.DatasetAppConfig>({
 export const defaultTargets = selector({
   key: "defaultTargets",
   get: ({ get }) => {
-    return get(atoms.dataset).defaultMaskTargets || {};
+    return normalizeMaskTargetsCase(
+      (get(atoms.dataset).defaultMaskTargets || {}) as MaskTargets
+    );
   },
   cachePolicy_UNSTABLE: {
     eviction: "most-recent",
@@ -127,11 +131,22 @@ export const defaultTargets = selector({
 export const targets = selector({
   key: "targets",
   get: ({ get }) => {
-    const defaults = get(atoms.dataset).defaultMaskTargets || {};
+    const defaults = normalizeMaskTargetsCase(
+      (get(atoms.dataset).defaultMaskTargets || {}) as MaskTargets
+    );
     const labelTargets = get(atoms.dataset)?.maskTargets || {};
+    const labelTargetsCaseNormalized = Object.entries(labelTargets).reduce(
+      (acc, [fieldName, fieldMaskTargets]) => {
+        acc[fieldName] = normalizeMaskTargetsCase(
+          fieldMaskTargets as MaskTargets
+        );
+        return acc;
+      },
+      {}
+    );
     return {
       defaults,
-      fields: labelTargets,
+      fields: labelTargetsCaseNormalized,
     };
   },
   cachePolicy_UNSTABLE: {
@@ -326,25 +341,52 @@ export const hiddenFieldLabels = selectorFamily<string[], string>({
   },
 });
 
-export const similarityKeys = selector<{
-  patches: [string, string][];
-  samples: string[];
+export type Method = {
+  key: string;
+  supportsPrompts: boolean;
+  maxK: number;
+  supportsLeastSimilarity: boolean;
+};
+
+export const similarityMethods = selector<{
+  patches: [Method, string][];
+  samples: Method[];
 }>({
-  key: "similarityKeys",
+  key: "similarityMethods",
   get: ({ get }) => {
     const methods = get(atoms.dataset).brainMethods;
+
     return methods
-      .filter(({ config: { method } }) => method === "similarity")
+      .filter(
+        ({ config: { type, cls } }) =>
+          type == "similarity" || cls.toLowerCase().includes("similarity")
+      )
       .reduce(
         (
           { patches, samples },
 
-          { config: { patchesField }, key }
+          {
+            config: {
+              patchesField,
+              supportsPrompts,
+              supportsLeastSimilarity,
+              maxK,
+            },
+            key,
+          }
         ) => {
           if (patchesField) {
-            patches.push([key, patchesField]);
+            patches.push([
+              { key, supportsPrompts, supportsLeastSimilarity, maxK },
+              patchesField,
+            ]);
           } else {
-            samples.push(key);
+            samples.push({
+              key,
+              supportsPrompts,
+              supportsLeastSimilarity,
+              maxK,
+            });
           }
           return { patches, samples };
         },
@@ -500,3 +542,19 @@ function getLabelIdsFromSample(sample, path, matchesFilter) {
 
   return labelIds;
 }
+
+export const hasSelectedLabels = selector<boolean>({
+  key: "hasSelectedLabels",
+  get: ({ get }) => {
+    const selected = get(selectedLabelIds);
+    return selected.size > 0;
+  },
+});
+
+export const hasSelectedSamples = selector<boolean>({
+  key: "hasSelectedSamples",
+  get: ({ get }) => {
+    const selected = get(atoms.selectedSamples);
+    return selected.size > 0;
+  },
+});

@@ -6,7 +6,6 @@ Defines the shared state between the FiftyOne App and backend.
 |
 """
 from bson import json_util
-from dataclasses import asdict
 import json
 import logging
 import typing as t
@@ -17,6 +16,7 @@ import eta.core.serial as etas
 import eta.core.utils as etau
 
 import fiftyone as fo
+import fiftyone.core.clips as foc
 import fiftyone.core.dataset as fod
 import fiftyone.core.media as fom
 import fiftyone.core.utils as fou
@@ -37,9 +37,10 @@ class StateDescription(etas.Serializable):
         dataset (None): the current :class:`fiftyone.core.dataset.Dataset`
         selected (None): the list of currently selected samples
         selected_labels (None): the list of currently selected labels
+        spaces (None): spaces config
         view (None): the current :class:`fiftyone.core.view.DatasetView`
         view_name (None): the name of the view if the current view is a
-        saved view
+            saved view
     """
 
     def __init__(
@@ -48,18 +49,19 @@ class StateDescription(etas.Serializable):
         dataset=None,
         selected=None,
         selected_labels=None,
-        view=None,
-        saved_view_slug=None,
-        view_name=None,
         spaces=None,
+        view=None,
+        view_name=None,
     ):
         self.config = config or fo.app_config.copy()
         self.dataset = dataset
         self.selected = selected or []
         self.selected_labels = selected_labels or []
-        self.view = view
-        self.view_name = view_name
-        self.saved_view_slug = saved_view_slug
+        self.view = (
+            dataset.load_saved_view(view_name)
+            if dataset is not None and view_name
+            else view
+        )
         self.spaces = spaces
 
     def serialize(self, reflective=True):
@@ -71,18 +73,27 @@ class StateDescription(etas.Serializable):
                 collection = self.dataset
                 if self.view is not None:
                     collection = self.view
+
+                    # @todo update App so this isn't needed?
+                    if isinstance(self.view, foc.TrajectoriesView):
+                        _view_cls = etau.get_class_name(foc.ClipsView)
+                    else:
+                        _view_cls = etau.get_class_name(self.view)
+
                     d["view"] = json.loads(
                         json_util.dumps(self.view._serialize())
                     )
-                    d["view_cls"] = etau.get_class_name(self.view)
+                    d["view_cls"] = _view_cls
 
                     d["view_name"] = self.view.name  # None for unsaved views
+                    if d.get("view_name") is not None:
+                        d["saved_view_slug"] = fou.to_slug(self.view.name)
 
                 d["sample_fields"] = serialize_fields(
-                    collection.get_field_schema(flat=True), dicts=True
+                    collection.get_field_schema(flat=True)
                 )
                 d["frame_fields"] = serialize_fields(
-                    collection.get_frame_field_schema(flat=True), dicts=True
+                    collection.get_frame_field_schema(flat=True)
                 )
 
                 view = self.view if self.view is not None else self.dataset
@@ -124,12 +135,17 @@ class StateDescription(etas.Serializable):
             dataset = fod.load_dataset(dataset)
 
         stages = d.get("view", None)
-        if dataset is not None and stages:
-            view = fov.DatasetView._build(dataset, stages)
-        else:
-            view = None
-
+        view = None
         view_name = d.get("view_name", None)
+        if dataset is not None:
+            if view_name:
+                view = dataset.load_saved_view(view_name)
+            elif stages:
+                try:
+                    view = fov.DatasetView._build(dataset, stages)
+                except:
+                    dataset.reload()
+                    view = fov.DatasetView._build(dataset, stages)
 
         group_slice = d.get("group_slice", None)
         if group_slice:
@@ -156,7 +172,6 @@ class StateDescription(etas.Serializable):
             selected=d.get("selected", []),
             selected_labels=d.get("selected_labels", []),
             view=view,
-            view_name=view_name,
             spaces=spaces,
         )
 
@@ -172,7 +187,7 @@ class SampleField:
     info: t.Optional[JSON]
 
 
-def serialize_fields(schema: t.Dict, dicts=False) -> t.List[SampleField]:
+def serialize_fields(schema: t.Dict) -> t.List[SampleField]:
     data = []
 
     if schema:
@@ -198,12 +213,6 @@ def serialize_fields(schema: t.Dict, dicts=False) -> t.List[SampleField]:
             else:
                 subfield = None
 
-            if field.info is not None:
-                # Converts mongoengine types to primitives
-                info = json.loads(json.dumps(field.info))
-            else:
-                info = None
-
             data.append(
                 SampleField(
                     path=path,
@@ -212,11 +221,8 @@ def serialize_fields(schema: t.Dict, dicts=False) -> t.List[SampleField]:
                     embedded_doc_type=embedded_doc_type,
                     subfield=subfield,
                     description=field.description,
-                    info=info,
+                    info=field.info,
                 )
             )
-
-    if dicts:
-        return [asdict(f) for f in data]
 
     return data

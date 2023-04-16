@@ -14,6 +14,7 @@ import unittest
 import eta.core.utils as etau
 
 import fiftyone as fo
+import fiftyone.core.odm as foo
 import fiftyone.utils.data as foud
 import fiftyone.utils.groups as foug
 from fiftyone import ViewField as F
@@ -69,6 +70,101 @@ class GroupTests(unittest.TestCase):
             dataset.group_media_types,
             {"left": "image", "ego": "video", "right": "image"},
         )
+
+    @drop_datasets
+    def test_group_dataset_frames_init(self):
+        conn = foo.get_db_conn()
+
+        dataset = fo.Dataset()
+        dataset.media_type = "group"
+
+        self.assertIsNone(dataset._frame_collection)
+        self.assertIsNone(dataset._frame_collection_name)
+        self.assertTrue(len(dataset._doc.frame_fields) == 0)
+
+        dataset.add_group_slice("pcd", "point-cloud")
+
+        self.assertIsNone(dataset._frame_collection)
+        self.assertIsNone(dataset._frame_collection_name)
+        self.assertTrue(len(dataset._doc.frame_fields) == 0)
+
+        dataset.add_group_slice("camera", "video")
+
+        self.assertIsNotNone(dataset._frame_collection)
+        self.assertIsNotNone(dataset._frame_collection_name)
+        self.assertTrue(len(dataset._doc.frame_fields) > 0)
+
+        collections = conn.list_collection_names()
+        self.assertIn(dataset._frame_collection_name, collections)
+
+        dataset = fo.Dataset()
+        group = fo.Group()
+
+        dataset.add_samples(
+            [
+                fo.Sample(
+                    filepath="left-image.jpg",
+                    group_field=group.element("left"),
+                ),
+                fo.Sample(
+                    filepath="right-image.jpg",
+                    group_field=group.element("right"),
+                ),
+            ]
+        )
+
+        self.assertIsNone(dataset._frame_collection)
+        self.assertIsNone(dataset._frame_collection_name)
+        self.assertTrue(len(dataset._doc.frame_fields) == 0)
+
+        dataset.add_sample(
+            fo.Sample(
+                filepath="ego-video.mp4",
+                group_field=group.element("ego"),
+            )
+        )
+
+        self.assertIsNotNone(dataset._frame_collection)
+        self.assertIsNotNone(dataset._frame_collection_name)
+        self.assertTrue(len(dataset._doc.frame_fields) > 0)
+
+        collections = conn.list_collection_names()
+        self.assertIn(dataset._frame_collection_name, collections)
+
+    @drop_datasets
+    def test_group_dataset_merge_frames_init(self):
+        group = fo.Group()
+        sample = fo.Sample(
+            filepath="video.mp4",
+            sample_key="vid",
+            group=group.element("vid"),
+        )
+
+        dataset1 = fo.Dataset()
+        dataset1.add_group_field("group")
+        dataset1.add_sample_field("sample_key", fo.StringField)
+
+        dataset1.merge_samples([sample], key_field="sample_key")
+
+        self.assertEqual(dataset1.media_type, "group")
+        self.assertEqual(dataset1.group_field, "group")
+        self.assertDictEqual(dataset1.group_media_types, {"vid": "video"})
+        self.assertIsNotNone(dataset1._frame_collection)
+        self.assertIsNotNone(dataset1._frame_collection_name)
+        self.assertEqual(len(dataset1), 1)
+
+        dataset2 = fo.Dataset()
+        dataset2.add_group_field("group")
+        dataset2.add_sample_field("sample_key", fo.StringField)
+
+        dataset2.merge_samples([sample], key_fcn=lambda s: s["sample_key"])
+
+        self.assertEqual(dataset2.media_type, "group")
+        self.assertEqual(dataset2.group_field, "group")
+        self.assertDictEqual(dataset2.group_media_types, {"vid": "video"})
+        self.assertIsNotNone(dataset2._frame_collection)
+        self.assertIsNotNone(dataset2._frame_collection_name)
+        self.assertEqual(len(dataset2), 1)
 
     @drop_datasets
     def test_basics(self):

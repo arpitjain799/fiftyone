@@ -368,7 +368,7 @@ def get_implied_field_kwargs(value, dynamic=False):
     if isinstance(value, (list, tuple)):
         kwargs = {"ftype": fof.ListField}
 
-        value_types = set(_get_list_value_type(v) for v in value)
+        value_types = set(_get_field_type(v) for v in value)
         value_types.discard(None)
 
         if value_types == {fof.IntField, fof.FloatField}:
@@ -379,10 +379,10 @@ def get_implied_field_kwargs(value, dynamic=False):
             kwargs["subfield"] = value_type
 
             if value_type == fof.EmbeddedDocumentField:
-                kwargs["embedded_doc_type"] = value_type.document_type
-                kwargs["fields"] = _parse_embedded_doc_list_fields(
-                    value, dynamic
-                )
+                document_type = _get_list_subfield_type(value)
+                fields = _parse_embedded_doc_list_fields(value, dynamic)
+                kwargs["embedded_doc_type"] = document_type
+                kwargs["fields"] = fields
 
         return kwargs
 
@@ -413,10 +413,9 @@ def _get_field_kwargs(value, field, dynamic):
         if field is not None:
             kwargs["subfield"] = type(field)
             if isinstance(field, fof.EmbeddedDocumentField):
+                fields = _parse_embedded_doc_list_fields(value, dynamic)
                 kwargs["embedded_doc_type"] = field.document_type
-                kwargs["fields"] = _parse_embedded_doc_list_fields(
-                    value, dynamic
-                )
+                kwargs["fields"] = fields
     elif isinstance(field, fof.EmbeddedDocumentField):
         kwargs["embedded_doc_type"] = field.document_type
         kwargs["fields"] = _parse_embedded_doc_fields(value, dynamic)
@@ -460,32 +459,31 @@ def _parse_embedded_doc_list_fields(values, dynamic):
         return []
 
     fields_dict = {}
-    fields = [_parse_embedded_doc_fields(v, dynamic) for v in values]
-    _merge_embedded_doc_fields(fields_dict, fields)
+    for value in values:
+        fields = _parse_embedded_doc_fields(value, dynamic)
+        _merge_embedded_doc_fields(fields_dict, fields)
+
     return _finalize_embedded_doc_fields(fields_dict)
 
 
-def _merge_embedded_doc_fields(fields_dict, fields_list):
-    for fields in fields_list:
-        for field in fields:
-            ftype = field["ftype"]
-            name = field["name"]
+def _merge_embedded_doc_fields(fields_dict, fields):
+    for field in fields:
+        ftype = field["ftype"]
+        name = field["name"]
 
-            if name not in fields_dict:
-                fields_dict[name] = field
-                if ftype == fof.EmbeddedDocumentField:
-                    field["fields"] = {f["name"]: f for f in field["fields"]}
-            else:
-                efield = fields_dict[name]
-                etype = efield["ftype"]
-                if etype != ftype:
-                    # @todo could provide an `add_mixed=True` option to declare
-                    # mixed fields like this as a generic `Field`
-                    fields_dict[name] = None
-                elif ftype == fof.EmbeddedDocumentField:
-                    _merge_embedded_doc_fields(
-                        efield["fields"], field["fields"]
-                    )
+        if name not in fields_dict:
+            fields_dict[name] = field
+            if ftype == fof.EmbeddedDocumentField:
+                field["fields"] = {f["name"]: f for f in field["fields"]}
+        else:
+            efield = fields_dict[name]
+            etype = efield["ftype"]
+            if etype != ftype:
+                # @todo could provide an `add_mixed=True` option to declare
+                # mixed fields like this as a generic `Field`
+                fields_dict[name] = None
+            elif ftype == fof.EmbeddedDocumentField:
+                _merge_embedded_doc_fields(efield["fields"], field["fields"])
 
 
 def _finalize_embedded_doc_fields(fields_dict):
@@ -556,7 +554,7 @@ def validate_fields_match(name, field, existing_field):
             )
 
 
-def _get_list_value_type(value):
+def _get_field_type(value):
     if isinstance(value, (bool, np.bool_)):
         return fof.BooleanField
 
@@ -580,6 +578,14 @@ def _get_list_value_type(value):
 
     if isinstance(value, date):
         return fof.DateField
+
+    return None
+
+
+def _get_list_subfield_type(values):
+    for v in values:
+        if v is not None:
+            return type(v)
 
     return None
 

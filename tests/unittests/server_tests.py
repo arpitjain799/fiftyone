@@ -49,7 +49,7 @@ class ServerViewTests(unittest.TestCase):
         expected = [
             {
                 "$set": {
-                    "__predictions.detections": {
+                    "___predictions.detections": {
                         "$filter": {
                             "input": "$predictions.detections",
                             "cond": {
@@ -84,7 +84,7 @@ class ServerViewTests(unittest.TestCase):
                             {
                                 "$size": {
                                     "$ifNull": [
-                                        "$__predictions.detections",
+                                        "$___predictions.detections",
                                         [],
                                     ]
                                 }
@@ -96,9 +96,9 @@ class ServerViewTests(unittest.TestCase):
             },
             {
                 "$set": {
-                    "__predictions.detections": {
+                    "___predictions.detections": {
                         "$filter": {
-                            "input": "$__predictions.detections",
+                            "input": "$___predictions.detections",
                             "cond": {"$in": ["$$this.label", ["carrot"]]},
                         }
                     }
@@ -111,7 +111,7 @@ class ServerViewTests(unittest.TestCase):
                             {
                                 "$size": {
                                     "$ifNull": [
-                                        "$__predictions.detections",
+                                        "$___predictions.detections",
                                         [],
                                     ]
                                 }
@@ -154,7 +154,7 @@ class ServerViewTests(unittest.TestCase):
                     }
                 }
             },
-            {"$unset": "__predictions"},
+            {"$unset": "___predictions"},
         ]
 
         self.assertEqual(expected, returned)
@@ -302,7 +302,7 @@ class ServerViewTests(unittest.TestCase):
                                 "$mergeObjects": [
                                     "$$frame",
                                     {
-                                        "__detections": {
+                                        "___detections": {
                                             "$mergeObjects": [
                                                 "$$frame.detections",
                                                 {
@@ -361,7 +361,7 @@ class ServerViewTests(unittest.TestCase):
                                             {
                                                 "$size": {
                                                     "$ifNull": [
-                                                        "$$this.__detections.detections",
+                                                        "$$this.___detections.detections",
                                                         [],
                                                     ]
                                                 }
@@ -385,13 +385,13 @@ class ServerViewTests(unittest.TestCase):
                                 "$mergeObjects": [
                                     "$$frame",
                                     {
-                                        "__detections": {
+                                        "___detections": {
                                             "$mergeObjects": [
-                                                "$$frame.__detections",
+                                                "$$frame.___detections",
                                                 {
                                                     "detections": {
                                                         "$filter": {
-                                                            "input": "$$frame.__detections.detections",
+                                                            "input": "$$frame.___detections.detections",
                                                             "cond": {
                                                                 "$in": [
                                                                     "$$this.label",
@@ -426,7 +426,7 @@ class ServerViewTests(unittest.TestCase):
                                             {
                                                 "$size": {
                                                     "$ifNull": [
-                                                        "$$this.__detections.detections",
+                                                        "$$this.___detections.detections",
                                                         [],
                                                     ]
                                                 }
@@ -484,7 +484,7 @@ class ServerViewTests(unittest.TestCase):
                     }
                 }
             },
-            {"$unset": "frames.__detections"},
+            {"$unset": "frames.___detections"},
         ]
 
         self.assertEqual(expected, returned)
@@ -673,7 +673,13 @@ class ServerViewTests(unittest.TestCase):
 
     @drop_datasets
     def test_extended_view_video_match_label_tags_aggregations(self):
-        filters = {"tags": {"label": ["one"]}}
+        filters = {
+            "_label_tags": {
+                "values": ["one"],
+                "exclude": False,
+                "isMatching": True,
+            }
+        }
 
         dataset = fod.Dataset("test")
         dataset.media_type = "video"
@@ -696,7 +702,7 @@ class ServerViewTests(unittest.TestCase):
                                 "$mergeObjects": [
                                     "$$frame",
                                     {
-                                        "__detections": {
+                                        "___detections": {
                                             "$mergeObjects": [
                                                 "$$frame.detections",
                                                 {
@@ -746,7 +752,7 @@ class ServerViewTests(unittest.TestCase):
                                             {
                                                 "$size": {
                                                     "$ifNull": [
-                                                        "$$this.__detections.detections",
+                                                        "$$this.___detections.detections",
                                                         [],
                                                     ]
                                                 }
@@ -775,7 +781,7 @@ class ServerViewTests(unittest.TestCase):
                                             "$$value",
                                             {
                                                 "$reduce": {
-                                                    "input": "$$this.__detections.detections",
+                                                    "input": "$$this.___detections.detections",
                                                     "initialValue": [],
                                                     "in": {
                                                         "$concatArrays": [
@@ -804,14 +810,20 @@ class ServerViewTests(unittest.TestCase):
                     }
                 }
             },
-            {"$unset": "frames.__detections"},
+            {"$unset": "frames.___detections"},
         ]
 
         self.assertEqual(expected, returned)
 
     @drop_datasets
     def test_extended_view_video_match_label_tags_samples(self):
-        filters = {"tags": {"label": ["one"]}}
+        filters = {
+            "_label_tags": {
+                "values": ["one"],
+                "exclude": False,
+                "isMatching": False,
+            }
+        }
 
         dataset = fod.Dataset("test")
         dataset.media_type = "video"

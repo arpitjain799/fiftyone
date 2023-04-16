@@ -25,6 +25,7 @@ from .core.aggregations import (
     Mean,
     Quantiles,
     Schema,
+    ListSchema,
     Std,
     Sum,
     Values,
@@ -192,6 +193,7 @@ from .core.stages import (
     ToPatches,
     ToEvaluationPatches,
     ToClips,
+    ToTrajectories,
     ToFrames,
 )
 from .core.session import (

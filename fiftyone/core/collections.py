@@ -124,13 +124,13 @@ class SaveContext(object):
                 % (self._dataset.name, sample._dataset.name)
             )
 
-        sample_op, frame_ops = sample._save(deferred=True)
-        updated = sample_op is not None or frame_ops
+        sample_ops, frame_ops = sample._save(deferred=True)
+        updated = sample_ops or frame_ops
 
         self._curr_batch_size += 1
 
-        if sample_op is not None:
-            self._sample_ops.append(sample_op)
+        if sample_ops:
+            self._sample_ops.extend(sample_ops)
 
         if frame_ops:
             self._frame_ops.extend(frame_ops)
@@ -594,13 +594,23 @@ class SampleCollection(object):
 
     def _get_samples_bytes(self):
         """Computes the total size of the sample documents in the collection."""
+
+        # Impl note: We *could* do group directly without projecting $bsonSize
+        #   first, however we found in Mongo 5.2 a new execution engine
+        #   (Slot Based Execution) optimizes this away and incorrectly sums
+        #   the full document size, thus ignoring selected fields. A ticket
+        #   has been opened to resolve this bug.
+        #   https://jira.mongodb.org/browse/SERVER-75267
+        #   But until then we must do this in 2 stages (project-size, group-sum)
+        #   rather than 1 (group-sum-size)
         pipeline = [
+            {"$project": {"size": {"$bsonSize": "$$ROOT"}}},
             {
                 "$group": {
                     "_id": None,
-                    "size_bytes": {"$sum": {"$bsonSize": "$$ROOT"}},
+                    "size_bytes": {"$sum": "$size"},
                 }
-            }
+            },
         ]
 
         results = self._aggregate(pipeline=pipeline)
@@ -615,13 +625,20 @@ class SampleCollection(object):
         if not self._contains_videos():
             return None
 
+        # Impl note: this pipeline does not suffer the same fate as
+        #   _get_samples_bytes, likely because the Slot Based Execution engine
+        #   is not used due to additional stage complexity. However, until the
+        #   underlying issue is addressed, it is more future-proof to use the
+        #   same workaround here rather than rely on the SBE engine not
+        #   being used in this case.
         pipeline = [
             {"$unwind": "$frames"},
             {"$replaceRoot": {"newRoot": "$frames"}},
+            {"$project": {"size": {"$bsonSize": "$$ROOT"}}},
             {
                 "$group": {
                     "_id": None,
-                    "size_bytes": {"$sum": {"$bsonSize": "$$ROOT"}},
+                    "size_bytes": {"$sum": "$size"},
                 }
             },
         ]
@@ -1058,7 +1075,7 @@ class SampleCollection(object):
             if last_key and not leaf:
                 continue
 
-            if isinstance(field, fof.ListField):
+            while isinstance(field, fof.ListField):
                 field = field.field
 
             if isinstance(field, fof.EmbeddedDocumentField) and not last_key:
@@ -1129,7 +1146,7 @@ class SampleCollection(object):
             "Subclass must implement get_frame_field_schema()"
         )
 
-    def get_dynamic_field_schema(self, fields=None):
+    def get_dynamic_field_schema(self, fields=None, recursive=True):
         """Returns a schema dictionary describing the dynamic fields of the
         samples in the collection.
 
@@ -1139,15 +1156,19 @@ class SampleCollection(object):
         Args:
             fields (None): an optional field or iterable of fields for which to
                 return dynamic fields. By default, all fields are considered
+            recursive (True): whether to recursively inspect nested lists and
+                embedded documents
 
         Returns:
             a dictionary mapping field paths to field types or lists of field
             types
         """
         schema = self.get_field_schema()
-        return self._get_dynamic_field_schema(schema, "", fields=fields)
+        return self._get_dynamic_field_schema(
+            schema, fields=fields, recursive=recursive
+        )
 
-    def get_dynamic_frame_field_schema(self, fields=None):
+    def get_dynamic_frame_field_schema(self, fields=None, recursive=True):
         """Returns a schema dictionary describing the dynamic fields of the
         frames of the samples in the collection.
 
@@ -1157,47 +1178,122 @@ class SampleCollection(object):
         Args:
             fields (None): an optional field or iterable of fields for which to
                 return dynamic fields. By default, all fields are considered
+            recursive (True): whether to recursively inspect nested lists and
+                embedded documents
 
         Returns:
             a dictionary mapping field paths to field types or lists of field
-            types
+            types, or ``None`` if the collection does not contain videos
         """
         if not self._has_frame_fields():
             return None
 
         schema = self.get_frame_field_schema()
         prefix = self._FRAMES_PREFIX
-        return self._get_dynamic_field_schema(schema, prefix, fields=fields)
+        return self._get_dynamic_field_schema(
+            schema, prefix=prefix, fields=fields, recursive=recursive
+        )
 
-    def _get_dynamic_field_schema(self, schema, prefix, fields=None):
+    def _get_dynamic_field_schema(
+        self, schema, prefix=None, fields=None, recursive=True
+    ):
+        if prefix is None:
+            prefix = ""
+
         if fields is not None:
             if etau.is_str(fields):
-                fields = {fields}
+                fields = [fields]
             else:
-                fields = set(fields)
+                fields = list(fields)
 
-            schema = {k: v for k, v in schema.items() if k in fields}
+            schema = {
+                k: v
+                for k, v in schema.items()
+                if any(f == k or f.startswith(k + ".") for f in fields)
+            }
+
+        dynamic_schema = self._do_get_dynamic_field_schema(schema, prefix)
+
+        # Recurse into new dynamic fields
+        if recursive:
+            s = dynamic_schema
+            while True:
+                s = self._do_get_dynamic_field_schema(s, prefix, new=True)
+                if s:
+                    dynamic_schema.update(s)
+                else:
+                    break
+
+        # Merge list fields and their subfields
+        while True:
+            edits = {}
+
+            for path, field in dynamic_schema.items():
+                subpath = path + "[]"
+                subfield = dynamic_schema.get(subpath, None)
+                if subfield is not None:
+                    field.field = subfield
+                    edits[subpath] = None
+                    for _path in dynamic_schema.keys():
+                        if _path.startswith(subpath + "."):
+                            edits[_path] = path + _path[len(subpath) :]
+
+                    break
+
+            for path, new_path in edits.items():
+                field = dynamic_schema.pop(path)
+                if new_path:
+                    dynamic_schema[new_path] = field
+
+            if not edits:
+                break
+
+        return dynamic_schema
+
+    def _do_get_dynamic_field_schema(self, schema, prefix, new=False):
+        schema = fof.flatten_schema(schema)
 
         aggs = []
         paths = []
-        for name, field in schema.items():
-            if isinstance(field, fof.EmbeddedDocumentField):
-                path = name
-                aggs.append(foa.Schema(prefix + path, dynamic_only=True))
-                paths.append(path)
+        for path, field in schema.items():
+            is_list_field = False
+            while isinstance(field, fof.ListField):
+                field = field.field
+                is_list_field = True
 
-                if issubclass(field.document_type, fol._LABEL_LIST_FIELDS):
-                    path = name + "." + field.document_type._LABEL_LIST_FIELD
-                    aggs.append(foa.Schema(prefix + path, dynamic_only=True))
-                    paths.append(path)
+            if isinstance(field, fof.EmbeddedDocumentField):
+                _path = prefix + path
+                if is_list_field and not _path.endswith("[]"):
+                    _path += "[]"
+
+                if new:
+                    # This field hasn't been declared yet, so we must provide
+                    # it's document type so that `Schema()` can distinguish
+                    # dynamic fields from builtin fields
+                    _doc_type = field.document_type
+                else:
+                    _doc_type = None
+
+                agg = foa.Schema(_path, dynamic_only=True, _doc_type=_doc_type)
+            elif field is None and is_list_field:
+                agg = foa.ListSchema(prefix + path)
+            else:
+                agg = None
+
+            if agg is not None:
+                aggs.append(agg)
+                paths.append(path)
 
         fields = {}
 
         if aggs:
             results = self.aggregate(aggs)
-            for path, schema in zip(paths, results):
-                for name, field in schema.items():
-                    fields[path + "." + name] = field
+            for path, agg, schema in zip(paths, aggs, results):
+                if isinstance(agg, foa.Schema):
+                    for name, field in schema.items():
+                        fields[path + "." + name] = field
+                elif isinstance(agg, foa.ListSchema):
+                    fields[path + "[]"] = schema
 
         return fields
 
@@ -1690,6 +1786,7 @@ class SampleCollection(object):
         skip_none=False,
         expand_schema=True,
         dynamic=False,
+        validate=True,
         _allow_missing=False,
         _sample_ids=None,
         _frame_ids=None,
@@ -1828,6 +1925,8 @@ class SampleCollection(object):
                 raised if the root ``field_name`` does not exist
             dynamic (False): whether to declare dynamic attributes of embedded
                 document fields that are encountered
+            validate (True): whether to validate that the values are compliant
+                with the dataset schema before adding them
         """
         if self._is_group_field(field_name):
             raise ValueError(
@@ -1851,32 +1950,32 @@ class SampleCollection(object):
             )
 
         if expand_schema:
-            to_mongo, new_group_field = self._expand_schema_from_values(
+            field, new_group_field = self._expand_schema_from_values(
                 field_name,
                 values,
                 dynamic=dynamic,
                 allow_missing=_allow_missing,
             )
         else:
-            to_mongo = None
+            field = None
             new_group_field = False
 
-        field = self.get_field(field_name)
+        if field is None:
+            field = self.get_field(field_name)
+
         _field_name, _, list_fields, _, id_to_str = self._parse_field_name(
             field_name, omit_terminal_lists=True, allow_missing=_allow_missing
         )
 
-        if id_to_str:
-            to_mongo = lambda _id: ObjectId(_id)
-        elif to_mongo is None and field is not None:
-            to_mongo = field.to_mongo
+        if field is None and id_to_str:
+            field = fof.ObjectIdField()
 
         # Setting an entire label list document whose label elements have been
         # filtered is not allowed because this would delete the filtered labels
         if (
-            isinstance(field, fof.EmbeddedDocumentField)
+            isinstance(self, fov.DatasetView)
+            and isinstance(field, fof.EmbeddedDocumentField)
             and issubclass(field.document_type, fol._LABEL_LIST_FIELDS)
-            and isinstance(self, fov.DatasetView)
         ):
             label_type = field.document_type
             list_field = label_type._LABEL_LIST_FIELD
@@ -1901,6 +2000,8 @@ class SampleCollection(object):
                     key_field=key_field,
                     skip_none=skip_none,
                     expand_schema=expand_schema,
+                    dynamic=dynamic,
+                    validate=validate,
                     _allow_missing=_allow_missing,
                     _sample_ids=_sample_ids,
                     _frame_ids=_frame_ids,
@@ -1909,10 +2010,14 @@ class SampleCollection(object):
         # If we're directly updating a document list field of a dataset view,
         # then update list elements by ID in case the field has been filtered
         if (
-            isinstance(field, fof.ListField)
+            isinstance(self, fov.DatasetView)
+            and isinstance(field, fof.ListField)
             and isinstance(field.field, fof.EmbeddedDocumentField)
-            and isinstance(self, fov.DatasetView)
+            and isinstance(
+                self.get_field(field_name + ".id"), fof.ObjectIdField
+            )
         ):
+            field = self.get_field(field_name, leaf=True)
             list_fields = sorted(set(list_fields + [_field_name]))
 
         try:
@@ -1923,8 +2028,9 @@ class SampleCollection(object):
                     list_fields,
                     sample_ids=_sample_ids,
                     frame_ids=_frame_ids,
-                    to_mongo=to_mongo,
+                    field=field,
                     skip_none=skip_none,
+                    validate=validate,
                 )
             else:
                 self._set_sample_values(
@@ -1932,8 +2038,9 @@ class SampleCollection(object):
                     values,
                     list_fields,
                     sample_ids=_sample_ids,
-                    to_mongo=to_mongo,
+                    field=field,
                     skip_none=skip_none,
+                    validate=validate,
                 )
         except:
             # Add a group field converts the dataset's type, so if it fails we
@@ -1946,7 +2053,7 @@ class SampleCollection(object):
         finally:
             if new_group_field:
                 self._dataset._doc.media_type = fom.GROUP
-                self._dataset._doc.save()
+                self._dataset.save()
 
     def set_label_values(
         self,
@@ -1954,6 +2061,7 @@ class SampleCollection(object):
         values,
         dynamic=False,
         skip_none=False,
+        validate=True,
     ):
         """Sets the fields of the specified labels in the collection to the
         given values.
@@ -1994,25 +2102,26 @@ class SampleCollection(object):
                 missing data that should not be set
             dynamic (False): whether to declare dynamic attributes of embedded
                 document fields that are encountered
+            validate (True): whether to validate that the values are compliant
+                with the dataset schema before adding them
         """
-        to_mongo, _ = self._expand_schema_from_values(
+        field, _ = self._expand_schema_from_values(
             field_name, values.values(), dynamic=dynamic, flat=True
         )
 
-        field = self.get_field(field_name)
+        if field is None:
+            field = self.get_field(field_name)
 
         _field_name, is_frame_field, _, _, id_to_str = self._parse_field_name(
             field_name, omit_terminal_lists=True
         )
 
+        if field is None and id_to_str:
+            field = fof.ObjectIdField()
+
         label_field = _field_name.split(".", 1)[0]
         if is_frame_field:
             label_field = self._FRAMES_PREFIX + label_field
-
-        if id_to_str:
-            to_mongo = lambda _id: ObjectId(_id)
-        elif to_mongo is None and field is not None:
-            to_mongo = field.to_mongo
 
         label_type, root = self._get_label_field_path(label_field)
         _root, _ = self._handle_frame_field(root)
@@ -2060,8 +2169,9 @@ class SampleCollection(object):
                 values,
                 id_map,
                 _root,
-                to_mongo=to_mongo,
+                field=field,
                 skip_none=skip_none,
+                validate=validate,
                 frames=is_frame_field,
             )
         else:
@@ -2072,8 +2182,9 @@ class SampleCollection(object):
                 _field_name,
                 _ids,
                 _values,
-                to_mongo=to_mongo,
+                field=field,
                 skip_none=skip_none,
+                validate=validate,
                 frames=is_frame_field,
             )
 
@@ -2086,10 +2197,12 @@ class SampleCollection(object):
         flat=False,
     ):
         field_name, _ = self._handle_group_field(field_name)
-        new_field = not self.has_field(field_name)
 
-        if not new_field and not dynamic:
-            return None, False
+        field = self.get_field(field_name)
+        new_group_field = False
+
+        if field is not None and not dynamic:
+            return field, new_group_field
 
         if not flat:
             _, _is_frame_field, _list_fields, _, _ = self._parse_field_name(
@@ -2102,15 +2215,12 @@ class SampleCollection(object):
         field_name, is_frame_field = self._handle_frame_field(field_name)
         root = field_name.split(".", 1)[0]
 
-        to_mongo = None
-        new_group_field = False
-
         if is_frame_field:
             new_root_field = not self.has_field(self._FRAMES_PREFIX + root)
 
             if new_root_field and root != field_name:
                 if allow_missing:
-                    return None, False
+                    return field, new_group_field
 
                 raise ValueError(
                     "Cannot infer an appropriate type for new frame field "
@@ -2121,8 +2231,8 @@ class SampleCollection(object):
             value = _get_non_none_value(values, level=level)
 
             if value is None:
-                if allow_missing or not new_field:
-                    return None, False
+                if field is not None or allow_missing:
+                    return field, new_group_field
 
                 raise ValueError(
                     "Cannot infer an appropriate type for new frame field "
@@ -2145,13 +2255,12 @@ class SampleCollection(object):
                 field = foo.create_implied_field(
                     field_name, value, dynamic=dynamic
                 )
-                to_mongo = field.to_mongo
         else:
             new_root_field = not self.has_field(root)
 
             if new_root_field and root != field_name:
                 if allow_missing:
-                    return None, False
+                    return field, new_group_field
 
                 raise ValueError(
                     "Cannot infer an appropriate type for new sample field "
@@ -2162,8 +2271,8 @@ class SampleCollection(object):
             value = _get_non_none_value(values, level=level)
 
             if value is None:
-                if allow_missing or not new_field:
-                    return None, False
+                if field is not None or allow_missing:
+                    return field, new_group_field
 
                 raise ValueError(
                     "Cannot infer an appropriate type for new sample field "
@@ -2179,7 +2288,7 @@ class SampleCollection(object):
                 self._dataset._add_group_field(field_name)
 
                 if not new_root_field:
-                    return None, False
+                    return field, new_group_field
 
                 slice_names = set()
                 for _value in values:
@@ -2216,9 +2325,8 @@ class SampleCollection(object):
                 field = foo.create_implied_field(
                     field_name, value, dynamic=dynamic
                 )
-                to_mongo = field.to_mongo
 
-        return to_mongo, new_group_field
+        return field, new_group_field
 
     def _set_sample_values(
         self,
@@ -2226,8 +2334,9 @@ class SampleCollection(object):
         values,
         list_fields,
         sample_ids=None,
-        to_mongo=None,
+        field=None,
         skip_none=False,
+        validate=True,
     ):
         if len(list_fields) > 1:
             raise ValueError(
@@ -2251,8 +2360,9 @@ class SampleCollection(object):
                 elem_ids,
                 values,
                 list_field,
-                to_mongo=to_mongo,
+                field=field,
                 skip_none=skip_none,
+                validate=validate,
             )
         else:
             if sample_ids is not None:
@@ -2264,8 +2374,9 @@ class SampleCollection(object):
                 field_name,
                 sample_ids,
                 values,
-                to_mongo=to_mongo,
+                field=field,
                 skip_none=skip_none,
+                validate=validate,
             )
 
     def _set_frame_values(
@@ -2275,8 +2386,9 @@ class SampleCollection(object):
         list_fields,
         sample_ids=None,
         frame_ids=None,
-        to_mongo=None,
+        field=None,
         skip_none=False,
+        validate=True,
     ):
         if len(list_fields) > 1:
             raise ValueError(
@@ -2309,8 +2421,9 @@ class SampleCollection(object):
                 elem_ids,
                 values,
                 list_field,
-                to_mongo=to_mongo,
+                field=field,
                 skip_none=skip_none,
+                validate=validate,
                 frames=True,
             )
         else:
@@ -2324,8 +2437,9 @@ class SampleCollection(object):
                 field_name,
                 frame_ids,
                 values,
-                to_mongo=to_mongo,
+                field=field,
                 skip_none=skip_none,
+                validate=validate,
                 frames=True,
             )
 
@@ -2334,8 +2448,9 @@ class SampleCollection(object):
         field_name,
         ids,
         values,
-        to_mongo=None,
+        field=None,
         skip_none=False,
+        validate=True,
         frames=False,
     ):
         ops = []
@@ -2346,8 +2461,10 @@ class SampleCollection(object):
             if etau.is_str(_id):
                 _id = ObjectId(_id)
 
-            if to_mongo is not None:
-                value = to_mongo(value)
+            if field is not None:
+                value = _serialize_value(
+                    field_name, field, value, validate=validate
+                )
 
             ops.append(UpdateOne({"_id": _id}, {"$set": {field_name: value}}))
 
@@ -2360,8 +2477,9 @@ class SampleCollection(object):
         elem_ids,
         values,
         list_field,
-        to_mongo=None,
+        field=None,
         skip_none=False,
+        validate=True,
         frames=False,
     ):
         root = list_field
@@ -2384,8 +2502,10 @@ class SampleCollection(object):
                 if value is None and skip_none:
                     continue
 
-                if to_mongo is not None:
-                    value = to_mongo(value)
+                if field is not None:
+                    value = _serialize_value(
+                        field_name, field, value, validate=validate
+                    )
 
                 if _elem_id is None:
                     raise ValueError(
@@ -2410,8 +2530,9 @@ class SampleCollection(object):
         values,
         id_map,
         list_field,
-        to_mongo=None,
+        field=None,
         skip_none=None,
+        validate=True,
         frames=False,
     ):
         root = list_field
@@ -2423,8 +2544,10 @@ class SampleCollection(object):
             if value is None and skip_none:
                 continue
 
-            if to_mongo is not None:
-                value = to_mongo(value)
+            if field is not None:
+                value = _serialize_value(
+                    field_name, field, value, validate=validate
+                )
 
             ops.append(
                 UpdateOne(
@@ -3100,13 +3223,30 @@ class SampleCollection(object):
         """
         return eval_key in self.list_evaluations()
 
-    def list_evaluations(self):
+    def list_evaluations(self, type=None, **kwargs):
         """Returns a list of all evaluation keys on this collection.
+
+        Args:
+            type (None): an :class:`fiftyone.core.evaluations.EvaluationMethod`
+                type. If provided, only runs that are a subclass of this type
+                are included
+            **kwargs: optional config paramters to match
 
         Returns:
             a list of evaluation keys
         """
-        return foev.EvaluationMethod.list_runs(self)
+        return foev.EvaluationMethod.list_runs(self, type=type, **kwargs)
+
+    def rename_evaluation(self, eval_key, new_eval_key):
+        """Replaces the key for the given evaluation with a new key.
+
+        Args:
+            eval_key: an evaluation key
+            new_anno_key: a new evaluation key
+        """
+        return foev.EvaluationMethod.update_run_key(
+            self, eval_key, new_eval_key
+        )
 
     def get_evaluation_info(self, eval_key):
         """Returns information about the evaluation with the given key on this
@@ -3120,19 +3260,22 @@ class SampleCollection(object):
         """
         return foev.EvaluationMethod.get_run_info(self, eval_key)
 
-    def load_evaluation_results(self, eval_key, cache=True):
+    def load_evaluation_results(self, eval_key, cache=True, **kwargs):
         """Loads the results for the evaluation with the given key on this
         collection.
 
         Args:
             eval_key: an evaluation key
             cache (True): whether to cache the results on the collection
+            **kwargs: keyword arguments for the run's
+                :meth:`fiftyone.core.evaluation.EvaluationMethodConfig.load_credentials`
+                method
 
         Returns:
             a :class:`fiftyone.core.evaluation.EvaluationResults`
         """
         return foev.EvaluationMethod.load_run_results(
-            self, eval_key, cache=cache
+            self, eval_key, cache=cache, **kwargs
         )
 
     def load_evaluation_view(self, eval_key, select_fields=False):
@@ -3180,13 +3323,28 @@ class SampleCollection(object):
         """
         return brain_key in self.list_brain_runs()
 
-    def list_brain_runs(self):
+    def list_brain_runs(self, type=None, **kwargs):
         """Returns a list of all brain keys on this collection.
+
+        Args:
+            type (None): a :class:`fiftyone.core.brain.BrainMethod` type. If
+                provided, only runs that are a subclass of this type are
+                included
+            **kwargs: optional config paramters to match
 
         Returns:
             a list of brain keys
         """
-        return fob.BrainMethod.list_runs(self)
+        return fob.BrainMethod.list_runs(self, type=type, **kwargs)
+
+    def rename_brain_run(self, brain_key, new_brain_key):
+        """Replaces the key for the given brain run with a new key.
+
+        Args:
+            brain_key: a brain key
+            new_brain_key: a new brain key
+        """
+        return fob.BrainMethod.update_run_key(self, brain_key, new_brain_key)
 
     def get_brain_info(self, brain_key):
         """Returns information about the brain method run with the given key on
@@ -3200,7 +3358,9 @@ class SampleCollection(object):
         """
         return fob.BrainMethod.get_run_info(self, brain_key)
 
-    def load_brain_results(self, brain_key, cache=True, load_view=True):
+    def load_brain_results(
+        self, brain_key, cache=True, load_view=True, **kwargs
+    ):
         """Loads the results for the brain method run with the given key on
         this collection.
 
@@ -3209,12 +3369,15 @@ class SampleCollection(object):
             cache (True): whether to cache the results on the collection
             load_view (True): whether to load the view on which the results
                 were computed (True) or the full dataset (False)
+            **kwargs: keyword arguments for the run's
+                :meth:`fiftyone.core.brain.BrainMethodConfig.load_credentials`
+                method
 
         Returns:
             a :class:`fiftyone.core.brain.BrainResults`
         """
         return fob.BrainMethod.load_run_results(
-            self, brain_key, cache=cache, load_view=load_view
+            self, brain_key, cache=cache, load_view=load_view, **kwargs
         )
 
     def load_brain_view(self, brain_key, select_fields=False):
@@ -3245,41 +3408,6 @@ class SampleCollection(object):
     def delete_brain_runs(self):
         """Deletes all brain method runs from this collection."""
         fob.BrainMethod.delete_runs(self)
-
-    def _get_similarity_keys(self, **kwargs):
-        from fiftyone.brain import SimilarityConfig
-
-        return self._get_brain_runs_with_type(SimilarityConfig, **kwargs)
-
-    def _get_visualization_keys(self, **kwargs):
-        from fiftyone.brain import VisualizationConfig
-
-        return self._get_brain_runs_with_type(VisualizationConfig, **kwargs)
-
-    def _get_brain_runs_with_type(self, run_type, **kwargs):
-        brain_keys = []
-        for brain_key in self.list_brain_runs():
-            try:
-                brain_info = self.get_brain_info(brain_key)
-            except:
-                logger.warning(
-                    "Failed to load info for brain method run '%s'", brain_key
-                )
-                continue
-
-            run_cls = etau.get_class(brain_info.config.cls)
-            if not issubclass(run_cls, run_type):
-                continue
-
-            if any(
-                getattr(brain_info.config, key, None) != value
-                for key, value in kwargs.items()
-            ):
-                continue
-
-            brain_keys.append(brain_key)
-
-        return brain_keys
 
     @classmethod
     def list_view_stages(cls):
@@ -6184,6 +6312,57 @@ class SampleCollection(object):
         return self._add_view_stage(fos.ToClips(field_or_expr, **kwargs))
 
     @view_stage
+    def to_trajectories(self, field, **kwargs):
+        """Creates a view that contains one clip for each unique object
+        trajectory defined by their ``(label, index)`` in a frame-level field
+        of a video collection.
+
+        The returned view will contain:
+
+        -   A ``sample_id`` field that records the sample ID from which each
+            clip was taken
+        -   A ``support`` field that records the ``[first, last]`` frame
+            support of each clip
+        -   A sample-level label field that records the ``label`` and ``index``
+            of each trajectory
+
+        Examples::
+
+            import fiftyone as fo
+            import fiftyone.zoo as foz
+            from fiftyone import ViewField as F
+
+            dataset = foz.load_zoo_dataset("quickstart-video")
+
+            #
+            # Create a trajectories view for the vehicles in the dataset
+            #
+
+            trajectories = (
+                dataset
+                .filter_labels("frames.detections", F("label") == "vehicle")
+                .to_trajectories("frames.detections")
+            )
+
+            print(trajectories)
+
+        Args:
+            field: a frame-level label list field of any of the following
+                types:
+
+                -   :class:`fiftyone.core.labels.Detections`
+                -   :class:`fiftyone.core.labels.Polylines`
+                -   :class:`fiftyone.core.labels.Keypoints`
+            **kwargs: optional keyword arguments for
+                :meth:`fiftyone.core.clips.make_clips_dataset` specifying how
+                to perform the conversion
+
+        Returns:
+            a :class:`fiftyone.core.clips.TrajectoriesView`
+        """
+        return self._add_view_stage(fos.ToTrajectories(field, **kwargs))
+
+    @view_stage
     def to_frames(self, **kwargs):
         """Creates a view that contains one sample per frame in the video
         collection.
@@ -7008,6 +7187,7 @@ class SampleCollection(object):
         field_or_expr,
         expr=None,
         dynamic_only=False,
+        _doc_type=None,
         _include_private=False,
     ):
         """Extracts the names and types of the attributes of a specified
@@ -7091,8 +7271,102 @@ class SampleCollection(object):
             field_or_expr,
             expr=expr,
             dynamic_only=dynamic_only,
+            _doc_type=_doc_type,
             _include_private=_include_private,
         )
+        return self._make_and_aggregate(make, field_or_expr)
+
+    @aggregation
+    def list_schema(self, field_or_expr, expr=None):
+        """Extracts the value type(s) in a specified list field across all
+        samples in the collection.
+
+        Examples::
+
+            from datetime import datetime
+            import fiftyone as fo
+
+            dataset = fo.Dataset()
+
+            sample1 = fo.Sample(
+                filepath="image1.png",
+                ground_truth=fo.Classification(
+                    label="cat",
+                    info=[
+                        fo.DynamicEmbeddedDocument(
+                            task="initial_annotation",
+                            author="Alice",
+                            timestamp=datetime(1970, 1, 1),
+                            notes=["foo", "bar"],
+                        ),
+                        fo.DynamicEmbeddedDocument(
+                            task="editing_pass",
+                            author="Bob",
+                            timestamp=datetime.utcnow(),
+                        ),
+                    ],
+                ),
+            )
+
+            sample2 = fo.Sample(
+                filepath="image2.png",
+                ground_truth=fo.Classification(
+                    label="dog",
+                    info=[
+                        fo.DynamicEmbeddedDocument(
+                            task="initial_annotation",
+                            author="Bob",
+                            timestamp=datetime(2018, 10, 18),
+                            notes=["spam", "eggs"],
+                        ),
+                    ],
+                ),
+            )
+
+            dataset.add_samples([sample1, sample2])
+
+            # Determine that `ground_truth.info` contains embedded documents
+            print(dataset.list_schema("ground_truth.info"))
+            # fo.EmbeddedDocumentField
+
+            # Determine the fields of the embedded documents in the list
+            print(dataset.schema("ground_truth.info[]"))
+            # {'task': StringField, ..., 'notes': ListField}
+
+            # Determine the type of the values in the nested `notes` list field
+            # Since `ground_truth.info` is not yet declared on the dataset's
+            # schema, we must manually include `[]` to unwind the info lists
+            print(dataset.list_schema("ground_truth.info[].notes"))
+            # fo.StringField
+
+            # Declare the `ground_truth.info` field
+            dataset.add_sample_field(
+                "ground_truth.info",
+                fo.ListField,
+                subfield=fo.EmbeddedDocumentField,
+                embedded_doc_type=fo.DynamicEmbeddedDocument,
+            )
+
+            # Now we can inspect the nested `notes` field without unwinding
+            print(dataset.list_schema("ground_truth.info.notes"))
+            # fo.StringField
+
+        Args:
+            field_or_expr: a field name, ``embedded.field.name``,
+                :class:`fiftyone.core.expressions.ViewExpression`, or
+                `MongoDB expression <https://docs.mongodb.com/manual/meta/aggregation-quick-reference/#aggregation-expressions>`_
+                defining the field or expression to aggregate
+            expr (None): a :class:`fiftyone.core.expressions.ViewExpression` or
+                `MongoDB expression <https://docs.mongodb.com/manual/meta/aggregation-quick-reference/#aggregation-expressions>`_
+                to apply to ``field_or_expr`` (which must be a field) before
+                aggregating
+
+        Returns:
+            a :class:`fiftyone.core.fields.Field` or list of
+            :class:`fiftyone.core.fields.Field` instances describing the value
+            type(s) in the list
+        """
+        make = lambda field_or_expr: foa.ListSchema(field_or_expr, expr=expr)
         return self._make_and_aggregate(make, field_or_expr)
 
     @aggregation
@@ -7857,13 +8131,30 @@ class SampleCollection(object):
         """
         return anno_key in self.list_annotation_runs()
 
-    def list_annotation_runs(self):
+    def list_annotation_runs(self, type=None, **kwargs):
         """Returns a list of all annotation keys on this collection.
+
+        Args:
+            type (None): a :class:`fiftyone.core.annotations.AnnotationMethod`
+                type. If provided, only runs that are a subclass of this type
+                are included
+            **kwargs: optional config paramters to match
 
         Returns:
             a list of annotation keys
         """
-        return foan.AnnotationMethod.list_runs(self)
+        return foan.AnnotationMethod.list_runs(self, type=type, **kwargs)
+
+    def rename_annotation_run(self, anno_key, new_anno_key):
+        """Replaces the key for the given annotation run with a new key.
+
+        Args:
+            anno_key: an annotation key
+            new_anno_key: a new annotation key
+        """
+        return foan.AnnotationMethod.update_run_key(
+            self, anno_key, new_anno_key
+        )
 
     def get_annotation_info(self, anno_key):
         """Returns information about the annotation run with the given key on
@@ -7892,17 +8183,16 @@ class SampleCollection(object):
         Args:
             anno_key: an annotation key
             cache (True): whether to cache the results on the collection
-            **kwargs: optional keyword arguments for
-                :meth:`fiftyone.utils.annotations.AnnotationResults.load_credentials`
+            **kwargs: keyword arguments for run's
+                :meth:`fiftyone.core.annotation.AnnotationMethodConfig.load_credentials`
+                method
 
         Returns:
             a :class:`fiftyone.utils.annotations.AnnotationResults`
         """
-        results = foan.AnnotationMethod.load_run_results(
-            self, anno_key, cache=cache, load_view=False
+        return foan.AnnotationMethod.load_run_results(
+            self, anno_key, cache=cache, load_view=False, **kwargs
         )
-        results.load_credentials(**kwargs)
-        return results
 
     def load_annotation_view(self, anno_key, select_fields=False):
         """Loads the :class:`fiftyone.core.view.DatasetView` on which the
@@ -7951,8 +8241,9 @@ class SampleCollection(object):
                     labels, or ``None`` if there aren't any
             cleanup (False): whether to delete any informtation regarding this
                 run from the annotation backend after loading the annotations
-            **kwargs: optional keyword arguments for
-                :meth:`fiftyone.utils.annotations.AnnotationResults.load_credentials`
+            **kwargs: keyword arguments for the run's
+                :meth:`fiftyone.core.annotation.AnnotationMethodConfig.load_credentials`
+                method
 
         Returns:
             ``None``, unless ``unexpected=="return"`` and unexpected labels are
@@ -9091,7 +9382,7 @@ class SampleCollection(object):
             elif isinstance(field, fof.EmbeddedDocumentField) and issubclass(
                 field.document_type, fol._HasMedia
             ):
-                media_fields[field_name] = field.document_type
+                media_fields[field_name] = field.document_type._MEDIA_FIELD
 
         if whitelist is not None:
             if etau.is_container(whitelist):
@@ -9177,7 +9468,14 @@ class SampleCollection(object):
         field_name, _ = self._handle_group_field(field_name)
         field_name, is_frame_field = self._handle_frame_field(field_name)
 
-        if field_name.startswith("__"):
+        if field_name.startswith(
+            "___"
+        ):  # for fiftyone.server.view hidden results
+            field_name = field_name[3:]
+
+        if field_name.startswith(
+            "__"
+        ):  # for fiftyone.core.stages hidden results
             field_name = field_name[2:]
 
         if is_frame_field:
@@ -9316,6 +9614,22 @@ class SampleCollection(object):
             for i, v in zip(*self.values([id_path, path_or_expr], unwind=True))
         }
         return [values_map.get(i, None) for i in ids]
+
+
+def _serialize_value(field_name, field, value, validate=True):
+    if value is None:
+        return None
+
+    if validate:
+        try:
+            field.validate(value)
+        except Exception as e:
+            raise ValueError(
+                "Invalid value for field '%s'. Reason: %s"
+                % (field_name, str(e))
+            )
+
+    return field.to_mongo(value)
 
 
 def _unwind_values(values, level=0):

@@ -12,7 +12,7 @@ import {
 import { useCallback, useRef } from "react";
 import { useErrorHandler } from "react-error-boundary";
 import { useRecoilValue } from "recoil";
-import { mainGroupSample, selectedMediaField } from "../recoil";
+import { groupSample, selectedMediaField } from "../recoil";
 
 import { SampleData, selectedSamples } from "../recoil/atoms";
 import * as schemaAtoms from "../recoil/schema";
@@ -25,14 +25,14 @@ export default <T extends FrameLooker | ImageLooker | VideoLooker>(
   isModal: boolean,
   thumbnail: boolean,
   options: Omit<ReturnType<T["getDefaultOptions"]>, "selected">,
-  highlight: boolean = false
+  highlight = false
 ) => {
   const selected = useRecoilValue(selectedSamples);
   const isClip = useRecoilValue(viewAtoms.isClipsView);
   const isFrame = useRecoilValue(viewAtoms.isFramesView);
   const isPatch = useRecoilValue(viewAtoms.isPatchesView);
   const handleError = useErrorHandler();
-  const activeId = isModal ? useRecoilValue(mainGroupSample)._id : null;
+  const activeId = isModal ? useRecoilValue(groupSample(null))._id : null;
 
   const view = useRecoilValue(viewAtoms.view);
   const dataset = useRecoilValue(datasetName);
@@ -56,7 +56,10 @@ export default <T extends FrameLooker | ImageLooker | VideoLooker>(
 
       const mimeType = getMimeType(sample);
 
-      if (mimeType !== null) {
+      // checking for pcd extension instead of media_type because this also applies for group slices
+      if (urls.filepath.endsWith(".pcd")) {
+        constructor = PcdLooker;
+      } else if (mimeType !== null) {
         const isVideo = mimeType.startsWith("video/");
 
         if (isVideo && (isFrame || isPatch)) {
@@ -66,20 +69,24 @@ export default <T extends FrameLooker | ImageLooker | VideoLooker>(
         if (isVideo) {
           constructor = VideoLooker;
         }
-
-        // checking for pcd extension instead of media_type because this also applies for group slices
-        if (urls.filepath.endsWith(".pcd")) {
-          constructor = PcdLooker;
-        }
       } else {
         constructor = ImageLooker;
       }
 
-      const sampleMediaFilePath =
-        constructor === PcdLooker &&
-        "orthographic_projection_metadata" in sample
-          ? (sample["orthographic_projection_metadata"]["filepath"] as string)
-          : urls[mediaField];
+      let sampleMediaFilePath = urls[mediaField];
+
+      if (constructor === PcdLooker) {
+        const orthographicProjectionField = Object.entries(sample)
+          .find(
+            (el) => el[1] && el[1]["_cls"] === "OrthographicProjectionMetadata"
+          )
+          ?.at(0) as string | undefined;
+        if (orthographicProjectionField) {
+          sampleMediaFilePath = urls[
+            `${orthographicProjectionField}.filepath`
+          ] as string;
+        }
+      }
 
       const config: ReturnType<T["getInitialState"]>["config"] = {
         fieldSchema: {
@@ -93,6 +100,7 @@ export default <T extends FrameLooker | ImageLooker | VideoLooker>(
             dbField: null,
           },
         },
+        sources: urls,
         frameNumber: constructor === FrameLooker ? frameNumber : undefined,
         frameRate,
         sampleId: sample._id,
