@@ -17,7 +17,7 @@ import {
   updateFieldSettings,
   validateJSONSetting,
 } from "./utils";
-import { CustomizeColor } from "@fiftyone/state";
+import { CustomizeColor, useSessionColorScheme } from "@fiftyone/state";
 import { isValidColor } from "@fiftyone/looker/src/overlays/util";
 import { ModalActionButtonContainer, BUTTON_STYLE } from "./ShareStyledDiv";
 
@@ -35,6 +35,8 @@ const onCancel = () => {
 };
 
 const ColorFooter: React.FC<Prop> = ({ eligibleFields }) => {
+  const [sessionColorPool, sessionCustomizedColors, setColorScheme] =
+    useSessionColorScheme();
   const [activeColorModalField, setActiveColorModalField] = useRecoilState(
     fos.activeColorField
   );
@@ -67,6 +69,7 @@ const ColorFooter: React.FC<Prop> = ({ eligibleFields }) => {
     onApply();
     onCancel();
   };
+  console.info("session", sessionColorPool, sessionCustomizedColors);
 
   const onApply = () => {
     if (typeof activeColorModalField !== "string") {
@@ -97,15 +100,18 @@ const ColorFooter: React.FC<Prop> = ({ eligibleFields }) => {
       // update color palette
       const validColors = colorScheme?.filter((c) => isValidColor(c));
       validColors.length > 0 && setColoring(validColors);
+
       // validate customizedColorSettings
       const validated = validateJSONSetting(
         customizedColorSettings,
         eligibleFields
       );
-      const jsonCustomizeColor = JSON.stringify(validated);
+      // const jsonCustomizeColor = JSON.stringify(validated);
       if (validated) {
         resetCustomizeColors(validated);
         validated.forEach((update) => setCustomizeColor(update));
+        console.info(sessionColorPool, sessionCustomizedColors);
+        setColorScheme(validColors, validated);
       }
     }
   };

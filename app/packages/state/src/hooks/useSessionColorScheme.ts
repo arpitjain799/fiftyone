@@ -1,5 +1,4 @@
 import * as foq from "@fiftyone/relay";
-import { useMemo } from "react";
 import { useErrorHandler } from "react-error-boundary";
 import { useMutation } from "react-relay";
 import { useRecoilState, useRecoilValue } from "recoil";
@@ -10,13 +9,14 @@ import {
 } from "../recoil";
 import useSendEvent from "./useSendEvent";
 
-const useColorScheme = () => {
+const useSessionColorScheme = () => {
   const send = useSendEvent(true);
   const subscription = useRecoilValue(stateSubscription);
+  const [commit] = useMutation<foq.setColorSchemeMutation>(foq.setColorScheme);
+  const onError = useErrorHandler();
   const [sessionColorSchemeState, setSessionColorSchemeState] =
     useRecoilState(sessionColorScheme);
-  const [commit] = useMutation<setColorSchemeMutation>(setColorScheme);
-  const onError = useErrorHandler();
+  const { colorPool, customizedColors } = sessionColorSchemeState;
 
   function setColorScheme(
     colors: string[],
@@ -28,11 +28,10 @@ const useColorScheme = () => {
     };
     const toAPI = {
       colorPool: colors,
-      customizedColors: JSON.stringify(customizedColors),
+      customizedColorSettings: customizedColors,
     };
 
     setSessionColorSchemeState(combined);
-
     return send((session) =>
       commit({
         onError,
@@ -45,10 +44,7 @@ const useColorScheme = () => {
       })
     );
   }
-
-  const { colorPool, customizedColors } = sessionColorSchemeState;
-
-  return [colorPool, customizedColors, setColorScheme];
+  return [colorPool, customizedColors, setColorScheme] as any[];
 };
 
-export default useColorScheme;
+export default useSessionColorScheme;

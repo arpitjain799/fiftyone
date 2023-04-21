@@ -298,7 +298,7 @@ class AppConfig(EnvConfig):
         self.customized_colors = self.parse_string_array(
             d,
             "customized_colors",
-            env_var="FIFTYONE_APP_CUSTOMIZED_COLORS",
+            env_var="FIFTYONE_APP_CUSTOMIZED_COLOR",
             default=[],
         )
         self.colorscale = self.parse_string(

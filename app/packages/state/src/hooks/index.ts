@@ -29,6 +29,7 @@ export { default as useSelectFlashlightSample } from "./useSelectFlashlightSampl
 export { default as useSelectSample } from "./useSelectSample";
 export { default as useSendEvent } from "./useSendEvent";
 export { default as useSessionSpaces } from "./useSessionSpaces";
+export { default as useSessionColorScheme } from "./useSessionColorScheme";
 export { default as useSetDataset } from "./useSetDataset";
 export { default as useSetExpandedSample } from "./useSetExpandedSample";
 export { default as useSetGroupSlice } from "./useSetGroupSlice";
@@ -36,6 +37,7 @@ export { default as useSetSelected } from "./useSetSelected";
 export { default as useSetSelectedLabels } from "./useSetSelectedLabels";
 export { default as useSetSpaces } from "./useSetSpaces";
 export { default as useSetView, stateProxy } from "./useSetView";
+export { default as useSetColorScheme } from "./useSetColorScheme";
 export * from "./useStateUpdate";
 export { default as useStateUpdate } from "./useStateUpdate";
 export { default as useTo } from "./useTo";

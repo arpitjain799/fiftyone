@@ -374,10 +374,7 @@ class Session(object):
             spaces = default_spaces.copy()
 
         if color_scheme is None:
-            color_scheme = (
-                # fo.app_config.color_cheme.copy() or
-                focn.DEFAULT_COLOR_SCHEME
-            )
+            color_scheme = focn.DEFAULT_COLOR_SCHEME
 
         self._state = StateDescription(
             config=config,
@@ -558,7 +555,7 @@ class Session(object):
                 "`Session.config` must be a %s or None; found %s"
                 % (AppConfig, type(config))
             )
-
+        print("set session config")
         self._state.config = config
 
     @property
@@ -577,17 +574,19 @@ class Session(object):
                 "`Session.spaces` must be a %s or None; found %s"
                 % (Space, type(spaces))
             )
-
+        print("set session spaces")
         self._state.spaces = spaces
 
     @property
     def color_scheme(self) -> ColorScheme:
         """The color scheme for the session."""
+        print("session.state.color_scheme", self._state.color_scheme)
         return self._state.color_scheme
 
     @color_scheme.setter  # type: ignore
     @update_state()
     def color_scheme(self, color_scheme: t.Optional[ColorScheme]) -> None:
+
         if color_scheme is None:
             color_scheme = (
                 # fo.app_config.color_scheme or
@@ -599,7 +598,7 @@ class Session(object):
                 "`Session.color_scheme` must be a %s or None; found %s"
                 % (ColorScheme, type(color_scheme))
             )
-
+        print("set session color_scheme", color_scheme)
         self._state.color_scheme = color_scheme
 
     @property
@@ -631,10 +630,7 @@ class Session(object):
         self._state.selected = []
         self._state.selected_labels = []
         self._state.spaces = default_spaces
-        self._state.color_scheme = (
-            # fo.app_config.color_scheme or
-            focn.DEFAULT_COLOR_SCHEME
-        )
+        self._state.color_scheme = focn.DEFAULT_COLOR_SCHEME
 
     @update_state()
     def clear_dataset(self) -> None:
