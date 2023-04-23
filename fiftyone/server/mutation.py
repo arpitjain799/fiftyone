@@ -57,6 +57,24 @@ class SavedViewInfo:
 
 
 @gql.input
+class LabelSetting:
+    name: str
+    color: str
+
+
+@gql.input
+class CustomizeColor:
+    field: str
+    use_field_color: t.Optional[bool]
+    field_color: t.Optional[str]
+    attribute_for_color: t.Optional[str]
+    use_opacity: t.Optional[bool]
+    attribute_for_opacity: t.Optional[str]
+    use_label_colors: t.Optional[bool]
+    label_colors: t.Optional[t.List[LabelSetting]]
+
+
+@gql.input
 class ColorScheme:
     color_pool: t.Optional[t.List[str]] = None
     customized_color_settings: t.Optional[JSON] = None

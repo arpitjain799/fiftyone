@@ -9,7 +9,6 @@ import {
 import { Sample } from "@fiftyone/looker/src/state";
 import { SpaceNodeJSON } from "@fiftyone/spaces";
 import { State } from "./types";
-import { sessionColorConfig } from "./config";
 import { Field } from "@fiftyone/utilities";
 
 export interface AppSample extends Sample {
@@ -121,8 +120,9 @@ export const customizeColors = atomFamily<CustomizeColor, string>({
     get:
       (path) =>
       ({ get }) => {
-        // use session.config.customizedColors as default
-        const settings = get(sessionColorConfig) as unknown as CustomizeColor[];
+        const sessionColorConfig = get(sessionColorScheme);
+        const settings = sessionColorConfig.customizedColors
+          ?.settings as unknown as CustomizeColor[];
         return settings?.find((s) => s.field === path) ?? null;
       },
   }),
@@ -133,8 +133,12 @@ export const customizeColorFields = atom<string[]>({
   default: selector({
     key: "initialColorFields",
     get: ({ get }) => {
-      // use session.config.customizedColors as default
-      return [...new Set(get(sessionColorConfig).map((s) => s.field))];
+      const sessionColorConfig = get(sessionColorScheme);
+      return [
+        ...new Set(
+          sessionColorConfig.customizedColors?.settings?.map((s) => s.field)
+        ),
+      ];
     },
   }),
 });
@@ -408,13 +412,15 @@ export const sessionSpaces = atom<SpaceNodeJSON>({
 
 export interface ColorScheme {
   colorPool: string[];
-  customizedColors: object;
+  customizedColors: { settings: CustomizeColor[] };
 }
 
 export const sessionColorScheme = atom<ColorScheme>({
   key: "sessionColorScheme",
   default: {
     colorPool: [],
-    customizedColors: [],
+    customizedColors: {
+      settings: [],
+    },
   },
 });

@@ -28,10 +28,13 @@ const useSessionColorScheme = () => {
     };
     const toAPI = {
       colorPool: colors,
-      customizedColorSettings: customizedColors,
+      customizedColorSettings: {
+        settings: customizedColors,
+      },
     };
 
     setSessionColorSchemeState(combined);
+
     return send((session) =>
       commit({
         onError,
