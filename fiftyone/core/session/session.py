@@ -222,6 +222,10 @@ def update_state(auto_show: bool = False) -> t.Callable:
             if auto_show and session.auto and focx.is_notebook_context():
                 session.freeze()
             result = func(session, *args, **kwargs)
+            print(
+                "decorator in session update-state",
+                session._state.color_scheme,
+            )
             session._client.send_event(StateUpdate(state=session._state))
             if auto_show and session.auto and focx.is_notebook_context():
                 session.show()
@@ -376,7 +380,6 @@ class Session(object):
         if color_scheme is None:
             color_scheme = focn.DEFAULT_COLOR_SCHEME
 
-        print("session init stateDescription color scheme", color_scheme)
         self._state = StateDescription(
             config=config,
             dataset=view._root_dataset if view is not None else dataset,
@@ -454,13 +457,13 @@ class Session(object):
                 % (Space, type(spaces))
             )
 
-        if color_scheme is not None and not isinstance(
-            color_scheme, ColorScheme
-        ):
-            raise ValueError(
-                "`color_scheme` must be a %s or None; found %s"
-                % (ColorScheme, type(color_scheme))
-            )
+        # if color_scheme is not None and not isinstance(
+        #     color_scheme, ColorScheme
+        # ):
+        #     raise ValueError(
+        #         "`color_scheme` must be a %s or None; found %s"
+        #         % (ColorScheme, type(color_scheme))
+        #     )
 
         if plots is not None and not isinstance(plots, fop.PlotManager):
             raise ValueError(
@@ -586,7 +589,6 @@ class Session(object):
     @color_scheme.setter  # type: ignore
     @update_state()
     def color_scheme(self, color_scheme: t.Optional[ColorScheme]) -> None:
-        print("setter", color_scheme)
         if color_scheme is None:
             color_scheme = ColorScheme(
                 color_pool=focn.DEFAULT_APP_COLOR_POOL,
@@ -600,6 +602,8 @@ class Session(object):
             )
 
         self._state.color_scheme = color_scheme
+        print("session setter", color_scheme)
+        print("session._state", self._state.color_scheme)
 
     @property
     def _collection(self) -> t.Union[fod.Dataset, fov.DatasetView, None]:

@@ -12,6 +12,9 @@ import uuid
 import fiftyone.core.fields as fof
 from fiftyone.core.odm import EmbeddedDocument
 
+# space { space: { children: [ { component_id: "1", type: "panel", pinned: false, state: {} } ], orientation: "horizontal", active_child: "1" } }
+# color_scheme {color_pool: [], customized_color_settings: [{field: "field", use_field_color: true, field_color: "#000000", use_label_colors: true, label_colors: [{name: "label", color: "#000000"}] }]}
+
 
 def _validate_children(children):
     if children is not None:

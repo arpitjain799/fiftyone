@@ -40,6 +40,7 @@ class Event:
 
     @staticmethod
     def from_data(event_name: str, data: t.Union[str, dict]) -> EventType:
+        print("Event.from_data, data", data)
         if event_name == Ping.get_event_name():
             return Ping()
 
@@ -52,6 +53,7 @@ class Event:
         )
 
         if event_cls == StateUpdate:
+            print("events, from_data", data["state"])
             data["state"] = fos.StateDescription.from_dict(data["state"])
 
         return from_dict(event_cls, data)
