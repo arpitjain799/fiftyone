@@ -26,6 +26,8 @@ import {
   tagging,
   theme,
   _activeFields,
+  sessionColorScheme,
+  customizeColors,
 } from "../recoil";
 
 import * as viewAtoms from "../recoil/view";
@@ -44,7 +46,7 @@ export type StateResolver =
 
 const useStateUpdate = (ignoreSpaces = false) => {
   const { setMode } = useColorScheme();
-
+  console.info("useStateupdate");
   return useRecoilTransaction_UNSTABLE(
     (t) => (resolve: StateResolver) => {
       const { config, dataset, state } =
@@ -91,6 +93,13 @@ const useStateUpdate = (ignoreSpaces = false) => {
         set(sessionSpaces, state.spaces);
       } else if (!ignoreSpaces) {
         reset(sessionSpaces);
+      }
+
+      if (state?.colorScheme) {
+        // update colorScheme atoms here
+        console.info(state.colorScheme);
+        set(sessionColorScheme, state.colorScheme);
+        // set(customizeColors, state.colorScheme.customizedColors)
       }
 
       if (dataset) {

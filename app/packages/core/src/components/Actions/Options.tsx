@@ -13,6 +13,8 @@ import Checkbox from "../Common/Checkbox";
 import { useTheme } from "@fiftyone/components";
 import * as fos from "@fiftyone/state";
 import {
+  activeColorField,
+  canEditCustomColors,
   configuredSidebarModeDefault,
   groupStatistics,
   isGroup,
@@ -62,10 +64,9 @@ const ColorBy = ({ modal }) => {
   return (
     <>
       <PopoutSectionTitle>Color by</PopoutSectionTitle>
-
       <TabOption
         active={colorBy}
-        options={["field", "instance", "label"].map((value) => {
+        options={["field", "value"].map((value) => {
           return {
             text: value,
             title: `Color by ${value}`,
@@ -225,6 +226,22 @@ const GroupStatistics = ({ modal }) => {
   );
 };
 
+const MoreSettings = () => {
+  const setActiveField = useSetRecoilState(activeColorField);
+  return (
+    <Button
+      style={{
+        margin: "0.25rem -0.5rem",
+        height: "2rem",
+        borderRadius: 0,
+        textAlign: "center",
+      }}
+      text="Advance color settings"
+      onClick={() => setActiveField("global")}
+    />
+  );
+};
+
 const SidebarMode = ({ modal }) => {
   const mode = useRecoilValue(configuredSidebarModeDefault(modal));
   const setMode = useSetRecoilState(sidebarMode(modal));
@@ -251,8 +268,10 @@ type OptionsProps = {
 
 const Options = ({ modal, bounds }: OptionsProps) => {
   const group = useRecoilValue(isGroup);
+  const canEdit = useRecoilValue(canEditCustomColors);
   return (
     <Popout modal={modal} bounds={bounds}>
+      {!modal && canEdit && <MoreSettings />}
       <ColorBy modal={modal} />
       <RefreshButton modal={modal} />
       <Opacity modal={modal} />

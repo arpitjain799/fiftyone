@@ -1,5 +1,6 @@
 import { StrictField } from "@fiftyone/utilities";
 import { SpaceNodeJSON } from "@fiftyone/spaces";
+import { CustomizeColor } from "./atoms";
 
 export namespace State {
   export type MediaType = "image" | "group" | "point_cloud" | "video";
@@ -17,6 +18,7 @@ export namespace State {
   export type PluginConfig = { [pluginName: string]: object };
   export interface Config {
     colorPool: string[];
+    customizedColors: CustomizeColor[];
     colorscale: string;
     gridZoom: number;
     loopVideos: boolean;
@@ -107,6 +109,11 @@ export namespace State {
     paths: string[];
   }
 
+  export interface ColorSetting {
+    colorPool: string[];
+    customizedColors: CustomizeColor[];
+  }
+
   export interface DatasetAppConfig {
     gridMediaField?: string;
     modalMediaField?: string;
@@ -114,6 +121,7 @@ export namespace State {
     plugins?: PluginConfig;
     sidebarGroups?: SidebarGroup[];
     sidebarMode?: "all" | "best" | "fast";
+    colorSetting?: ColorSetting;
   }
 
   /**
@@ -197,6 +205,11 @@ export namespace State {
     labelId: string;
   }
 
+  export interface ColorScheme {
+    colorPool: string[];
+    customizedColors: JSON[];
+  }
+
   export interface Description {
     dataset: string;
     selected: string[];
@@ -207,5 +220,6 @@ export namespace State {
     savedViewSlug: string | null;
     savedViews: SavedView[];
     spaces?: SpaceNodeJSON;
+    colorScheme?: ColorScheme;
   }
 }

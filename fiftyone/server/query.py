@@ -320,6 +320,24 @@ class Theme(Enum):
 
 
 @gql.type
+class LabelSetting:
+    name: str
+    color: str
+
+
+@gql.type
+class CustomizeColor:
+    field: str
+    use_field_color: t.Optional[bool]
+    field_color: t.Optional[str]
+    attribute_for_color: t.Optional[str]
+    use_opacity: t.Optional[bool]
+    attribute_for_Opacity: t.Optional[str]
+    use_label_colors: t.Optional[bool]
+    label_colors: t.Optional[t.List[LabelSetting]]
+
+
+@gql.type
 class AppConfig:
     color_by: ColorBy
     color_pool: t.List[str]

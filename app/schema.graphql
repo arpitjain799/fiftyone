@@ -95,15 +95,25 @@ type BrainRunConfig implements RunConfig {
   method: String
   patchesField: String
   supportsPrompts: Boolean
-  type: String
+  type: BrainRunType
   maxK: Int
   supportsLeastSimilarity: Boolean
+}
+
+enum BrainRunType {
+  similarity
+  visualization
 }
 
 enum ColorBy {
   field
   instance
   label
+}
+
+input ColorScheme {
+  colorPool: [String!] = null
+  customizedColorSettings: JSONArray = null
 }
 
 input CountValues {
@@ -264,6 +274,8 @@ type IntValueCount {
 
 scalar JSON
 
+scalar JSONArray
+
 type KeypointSkeleton {
   labels: [String!]
   edges: [[Int!]!]!
@@ -345,6 +357,12 @@ type Mutation {
     datasetName: String = null
   ): SavedView
   setSpaces(subscription: String!, session: String, spaces: BSON!): Boolean!
+  setColorScheme(
+    subscription: String!
+    session: String
+    colorScheme: ColorScheme!
+    saveToApp: Boolean! = false
+  ): Boolean!
 }
 
 type NamedKeypointSkeleton {
@@ -373,7 +391,7 @@ type Query {
     viewName: String = null
     form: ExtendedViewForm = null
   ): [AggregationResponses!]!
-  dataset(name: String!, view: BSONArray, savedViewSlug: String): Dataset
+  dataset(name: String!, view: BSONArray, savedViewSlug: String): Dataset!
   datasets(
     search: String
     first: Int = 200
@@ -424,6 +442,7 @@ interface Sample {
   id: ID!
   sample: JSON!
   urls: [MediaURL!]!
+  aspectRatio: Float!
 }
 
 type SampleField {
@@ -462,6 +481,8 @@ type SampleItemStrPageInfo {
 }
 
 type SavedView {
+  id: String
+  datasetId: String
   name: String
   description: String
   color: String
@@ -470,8 +491,6 @@ type SavedView {
   createdAt: datetime
   lastModifiedAt: datetime
   lastLoadedAt: datetime
-  id: String
-  datasetId: String
   viewName: String
   stageDicts: BSONArray
 }

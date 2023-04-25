@@ -24,7 +24,7 @@ from fiftyone.server.data import Info
 from fiftyone.server.events import get_state, dispatch_event
 from fiftyone.server.inputs import SelectedLabel
 from fiftyone.server.query import Dataset, SidebarGroup, SavedView
-from fiftyone.server.scalars import BSON, BSONArray, JSON
+from fiftyone.server.scalars import BSON, BSONArray, JSON, JSONArray
 from fiftyone.server.view import get_view
 
 
@@ -54,6 +54,12 @@ class SavedViewInfo:
     name: t.Optional[str] = None
     description: t.Optional[str] = None
     color: t.Optional[str] = None
+
+
+@gql.input
+class ColorScheme:
+    color_pool: t.Optional[t.List[str]] = None
+    customized_color_settings: t.Optional[JSONArray] = None
 
 
 @gql.type
@@ -388,6 +394,19 @@ class Mutation:
     ) -> bool:
         state = get_state()
         state.spaces = Space.from_dict(spaces)
+        await dispatch_event(subscription, StateUpdate(state=state))
+        return True
+
+    @gql.mutation
+    async def set_color_scheme(
+        self,
+        subscription: str,
+        session: t.Optional[str],
+        color_scheme: ColorScheme,
+        save_to_app: bool = False,
+    ) -> bool:
+        state = get_state()
+        state.color_scheme = color_scheme
         await dispatch_event(subscription, StateUpdate(state=state))
         return True
 

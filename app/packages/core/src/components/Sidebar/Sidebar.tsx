@@ -14,6 +14,7 @@ import * as fos from "@fiftyone/state";
 import { Box } from "@mui/material";
 import ViewSelection from "./ViewSelection";
 import { resizeHandle } from "./Sidebar.module.css";
+import { tempColorSetting } from "../ColorModal/utils";
 const MARGIN = 3;
 
 const fn = (

@@ -1,9 +1,15 @@
-import { atom, atomFamily, useRecoilCallback } from "recoil";
+import {
+  atom,
+  atomFamily,
+  selector,
+  selectorFamily,
+  useRecoilCallback,
+} from "recoil";
 
 import { Sample } from "@fiftyone/looker/src/state";
-
 import { SpaceNodeJSON } from "@fiftyone/spaces";
 import { State } from "./types";
+import { Field } from "@fiftyone/utilities";
 
 export interface AppSample extends Sample {
   _id: string;
@@ -86,6 +92,57 @@ export const modal = atom<ModalSample | null>({
   key: "modal",
   default: null,
 });
+
+// the active field for customize color modal
+export const activeColorField = atom<Field | "global" | "json" | null>({
+  key: "activeColorField",
+  default: null,
+});
+
+export interface CustomizeColor {
+  field: string;
+  useFieldColor: boolean;
+  fieldColor?: string;
+  attributeForColor?: string; // must be string field, int field, or boolean field
+  useOpacity: boolean;
+  attributeForOpacity?: string; // must be float field
+  useLabelColors: boolean;
+  labelColors?: {
+    name: string;
+    color: string;
+  }[];
+}
+
+// export const customizeColors = atomFamily<CustomizeColor, string>({
+//   key: "customizeColors",
+//   default: selectorFamily<CustomizeColor, string>({
+//     key: "initialCustomizeColors",
+//     get:
+//       (path) =>
+//       ({ get }) => {
+//         const settings = get(sessionColorScheme)
+//           .customizedColorSettings as unknown as CustomizeColor[];
+//         return settings?.find((s) => s.field === path) ?? null;
+//       },
+//   }),
+// });
+
+// export const customizeColorFields = atom<string[]>({
+//   key: "customizeColorFields",
+//   default: selector({
+//     key: "initialColorFields",
+//     get: ({ get }) => {
+//       return [
+//         ...new Set(
+//           get(sessionColorScheme)?.customizedColorSettings?.map(
+//             (s) => s["field"]
+//           )
+//         ),
+//       ];
+//       // return [];
+//     },
+//   }),
+// });
 
 export interface SortResults {
   count: boolean;
@@ -351,5 +408,18 @@ export const sessionSpaces = atom<SpaceNodeJSON>({
     ],
     type: "panel-container",
     activeChild: "default-samples-node",
+  },
+});
+
+export interface ColorScheme {
+  colorPool: string[];
+  customizedColorSettings: CustomizeColor[];
+}
+
+export const sessionColorScheme = atom<ColorScheme>({
+  key: "sessionColorScheme",
+  default: {
+    colorPool: [],
+    customizedColorSettings: [],
   },
 });
