@@ -30,6 +30,7 @@ import fiftyone.core.context as focx
 import fiftyone.core.plots as fop
 import fiftyone.core.service as fos
 from fiftyone.core.spaces import default_spaces, Space
+from fiftyone.core.colorscheme import default_color_scheme, ColorScheme
 from fiftyone.core.state import StateDescription
 import fiftyone.core.utils as fou
 import fiftyone.core.view as fov
@@ -378,7 +379,7 @@ class Session(object):
             spaces = default_spaces.copy()
 
         if color_scheme is None:
-            color_scheme = focn.DEFAULT_COLOR_SCHEME
+            color_scheme = default_color_scheme.copy()
 
         self._state = StateDescription(
             config=config,
@@ -634,10 +635,7 @@ class Session(object):
         self._state.selected = []
         self._state.selected_labels = []
         self._state.spaces = default_spaces
-        self._state.color_scheme = (
-            # fo.app_config.color_scheme or
-            focn.DEFAULT_COLOR_SCHEME
-        )
+        self._state.color_scheme = default_color_scheme
 
     @update_state()
     def clear_dataset(self) -> None:

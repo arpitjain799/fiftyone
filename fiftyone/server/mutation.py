@@ -16,6 +16,7 @@ import fiftyone.core.dataset as fod
 import fiftyone.core.odm as foo
 from fiftyone.core.session.events import StateUpdate
 from fiftyone.core.spaces import default_spaces, Space
+from fiftyone.core.colorscheme import default_color_scheme, ColorScheme
 import fiftyone.core.stages as fos
 import fiftyone.core.utils as fou
 import fiftyone.core.view as fov
@@ -56,10 +57,10 @@ class SavedViewInfo:
     color: t.Optional[str] = None
 
 
-@gql.input
-class ColorScheme:
-    color_pool: t.Optional[t.List[str]] = None
-    customized_color_settings: t.Optional[JSONArray] = None
+# @gql.input
+# class ColorScheme:
+#     color_pool: t.Optional[t.List[str]] = None
+#     customized_color_settings: t.Optional[JSONArray] = None
 
 
 @gql.type
@@ -80,6 +81,7 @@ class Mutation:
         state.view = None
         state.view_name = view_name if view_name is not None else None
         state.spaces = default_spaces
+        state.color_scheme = default_color_scheme
         await dispatch_event(subscription, StateUpdate(state=state))
         return True
 
@@ -402,11 +404,11 @@ class Mutation:
         self,
         subscription: str,
         session: t.Optional[str],
-        color_scheme: ColorScheme,
+        color_scheme: BSON,
         save_to_app: bool = False,
     ) -> bool:
         state = get_state()
-        state.color_scheme = color_scheme
+        state.color_scheme = ColorScheme.from_dict(color_scheme)
         await dispatch_event(subscription, StateUpdate(state=state))
         return True
 

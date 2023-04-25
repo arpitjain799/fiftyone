@@ -6,7 +6,7 @@ export default r(graphql`
   mutation setColorSchemeMutation(
     $subscription: String!
     $session: String
-    $colorScheme: ColorScheme!
+    $colorScheme: BSON!
     $saveToApp: Boolean!
   ) {
     setColorScheme(
