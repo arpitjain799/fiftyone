@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<cccf77b074997cfdb69a569b00fc82d9>>
+ * @generated SignedSource<<e5cee0cffc5ea7578304ea3e4a441e3b>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -9,12 +9,8 @@
 // @ts-nocheck
 
 import { ConcreteRequest, Mutation } from 'relay-runtime';
-export type ColorScheme = {
-  colorPool?: ReadonlyArray<string> | null;
-  customizedColorSettings?: Array | null;
-};
 export type setColorSchemeMutation$variables = {
-  colorScheme: ColorScheme;
+  colorScheme: object;
   saveToApp: boolean;
   session?: string | null;
   subscription: string;
@@ -106,16 +102,16 @@ return {
     "selections": (v4/*: any*/)
   },
   "params": {
-    "cacheID": "1e890a4257c9c1d1a30a9fa2a1c0a282",
+    "cacheID": "0953f9a982876dcdf31d174461aa2e11",
     "id": null,
     "metadata": {},
     "name": "setColorSchemeMutation",
     "operationKind": "mutation",
-    "text": "mutation setColorSchemeMutation(\n  $subscription: String!\n  $session: String\n  $colorScheme: ColorScheme!\n  $saveToApp: Boolean!\n) {\n  setColorScheme(subscription: $subscription, session: $session, colorScheme: $colorScheme, saveToApp: $saveToApp)\n}\n"
+    "text": "mutation setColorSchemeMutation(\n  $subscription: String!\n  $session: String\n  $colorScheme: BSON!\n  $saveToApp: Boolean!\n) {\n  setColorScheme(subscription: $subscription, session: $session, colorScheme: $colorScheme, saveToApp: $saveToApp)\n}\n"
   }
 };
 })();
 
-(node as any).hash = "a5e1f0d4d0a19a42b588ac7236c173e8";
+(node as any).hash = "dcd3d452545a5f3ebdcead5dd547db71";
 
 export default node;
